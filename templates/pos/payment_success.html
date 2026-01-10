@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="max-w-xl mx-auto p-6 text-center">
+
+    <h1 class="text-3xl font-bold mb-6 text-green-700">
+        PAYMENT SUCCESSFUL
+    </h1>
+
+    <div class="bg-white p-6 rounded shadow space-y-4">
+
+        <div class="text-xl">
+            Order #: <strong>{{ order.order_number }}</strong>
+        </div>
+
+        <div class="text-xl">
+            Payment Method: <strong>{{ method|upper }}</strong>
+        </div>
+
+        <div class="text-xl">
+            Total: <strong>{{ total }}</strong>
+        </div>
+
+        <div class="text-xl">
+            Amount Received: <strong>{{ amount_received }}</strong>
+        </div>
+
+        {% if method == 'cash' %}
+            <div class="mt-6 bg-green-100 p-6 rounded">
+                <div class="text-2xl font-bold text-green-800">
+                    CHANGE TO GIVE
+                </div>
+                <div class="text-5xl font-extrabold text-green-900 mt-2">
+                    {{ change }}
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="mt-6">
+            <a href="{% url 'pos_home' %}"
+               class="bg-blue-700 text-white px-8 py-4 rounded text-xl font-bold inline-block">
+                FINISH
+            </a>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %}

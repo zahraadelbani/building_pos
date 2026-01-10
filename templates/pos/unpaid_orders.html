@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="max-w-5xl mx-auto p-6">
+
+    <h1 class="text-3xl font-bold mb-6">Unpaid Orders</h1>
+
+    <form method="get" class="mb-6 flex gap-4">
+        <input type="text" name="q"
+               value="{{ query }}"
+               placeholder="Search by order number"
+               class="border p-3 rounded text-lg flex-1">
+
+        <button class="bg-blue-700 text-white px-6 py-3 rounded text-lg font-bold">
+            Search
+        </button>
+    </form>
+
+    <table class="w-full bg-white rounded shadow text-lg">
+        <thead class="bg-gray-200">
+            <tr>
+                <th class="p-3 text-left">Order #</th>
+                <th class="p-3 text-right">Total</th>
+                <th class="p-3 text-center">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for o in orders %}
+            <tr class="border-b">
+                <td class="p-3">Order #{{ o.order_number }}</td>
+                <td class="p-3 text-right">{{ o.total_amount }}</td>
+                <td class="p-3 text-center">
+                    <a href="{% url 'resume_order' o.id %}"
+                       class="bg-green-700 text-white px-4 py-2 rounded font-bold">
+                        Open
+                    </a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="3" class="p-6 text-center text-gray-500">
+                    No unpaid orders
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</div>
+
+{% endblock %}

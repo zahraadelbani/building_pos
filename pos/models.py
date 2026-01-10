@@ -17,6 +17,8 @@ class Order(models.Model):
         default='unpaid'
     )
 
+    is_active = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(default=timezone.now)
 
     def total_amount(self):
@@ -24,9 +26,6 @@ class Order(models.Model):
             total=Sum(F('quantity') * F('unit_price'))
         )['total']
         return total or 0
-
-    def __str__(self):
-        return f"Order #{self.order_number}"
 
 class OrderItem(models.Model):
     order = models.ForeignKey(

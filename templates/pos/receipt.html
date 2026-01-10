@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Receipt</title>
+
+    <style>
+        body {
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        .line {
+            border-top: 1px dashed #000;
+            margin: 8px 0;
+        }
+
+        table {
+            width: 100%;
+        }
+
+        td {
+            padding: 2px 0;
+        }
+
+        @media print {
+            button {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body onload="window.print()">
+
+<div class="center bold">
+    BUILDING MATERIALS SHOP
+</div>
+
+<div class="center">
+    {{ copy_type|upper }} COPY
+</div>
+
+<div class="line"></div>
+
+<div>
+    Order #: {{ order.order_number }}<br>
+    Date: {{ order.created_at|date:"Y-m-d H:i" }}<br>
+    Status: <strong>{{ order.status|upper }}</strong>
+</div>
+
+<div class="line"></div>
+
+<table>
+    {% for item in items %}
+    <tr>
+        <td>{{ item.item_name }}</td>
+        <td align="right">{{ item.quantity }} x {{ item.unit_price }}</td>
+        <td align="right">{{ item.line_total }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<div class="line"></div>
+
+<div class="bold">
+    TOTAL: {{ total }}
+</div>
+
+{% if payment %}
+    <div class="line"></div>
+
+    <div>
+        Payment: {{ payment.method|upper }}<br>
+
+        {% if payment.method == 'bank' %}
+            Bank: {{ payment.bank_name }}<br>
+        {% endif %}
+
+        Paid: {{ payment.amount_received }}<br>
+
+        {% if payment.method == 'cash' %}
+            Change: {{ payment.change_given }}
+        {% endif %}
+    </div>
+{% else %}
+    <div class="line"></div>
+    <div class="bold">
+        *** UNPAID ***
+    </div>
+{% endif %}
+
+<div class="line"></div>
+
+<div class="center">
+    Thank you
+</div>
+
+</body>
+</html>
