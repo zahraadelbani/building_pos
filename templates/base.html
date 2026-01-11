@@ -17,6 +17,33 @@
 </head>
 <body class="bg-gray-100 text-gray-900">
 
+    {% block nav %}
+        <nav class="bg-white border-b border-gray-200">
+            <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap gap-4 items-center">
+                <a href="{% url 'pos_home' %}" class="text-xl font-bold text-gray-900 hover:text-blue-700">
+                    POS
+                </a>
+                <a href="{% url 'products' %}" class="text-lg font-semibold text-gray-700 hover:text-blue-700">
+                    Products
+                </a>
+                <a href="{% url 'unpaid_orders' %}" class="text-lg font-semibold text-gray-700 hover:text-blue-700">
+                    Unpaid Orders
+                </a>
+            </div>
+        </nav>
+    {% endblock %}
+
+    {% if messages %}
+        <div class="max-w-7xl mx-auto px-6 pt-4">
+            {% for message in messages %}
+                <div class="mb-3 rounded border px-4 py-3 text-base font-semibold
+                    {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
     {% block content %}
     {% endblock %}
 

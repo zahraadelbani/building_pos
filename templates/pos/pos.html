@@ -1,135 +1,173 @@
 {% extends "base.html" %}
+{% block nav %}{% endblock %}
 {% block content %}
 
-<div class="max-w-7xl mx-auto p-6">
+<div class="min-h-screen bg-slate-100 text-slate-800">
+    <div class="flex flex-col lg:flex-row min-h-screen">
 
-    <!-- Tabs -->
-    <div class="flex flex-wrap gap-3 mb-6">
-        {% for o in open_orders %}
-            <a href="{% url 'pos_order' o.id %}"
-               class="px-6 py-3 rounded text-xl font-bold
-               {% if o.id == order.id %}
-                   bg-blue-700 text-white
-               {% else %}
-                   bg-gray-300 hover:bg-gray-400
-               {% endif %}">
-                Order #{{ o.order_number }}
-            </a>
-        {% endfor %}
+        <!-- ================= LEFT PANEL ================= -->
+        <div class="flex-1 flex flex-col bg-white border-r border-slate-200 shadow-sm">
 
-        <a href="{% url 'create_new_order' %}"
-           class="px-6 py-3 rounded bg-green-700 text-white text-xl font-bold hover:bg-green-800">
-            + New Order
-        </a>
-    </div>
+            <!-- HEADER -->
+            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                        Building Materials
+                    </p>
+                    <h1 class="text-2xl md:text-3xl font-bold">Point of Sale</h1>
+                    <div class="text-sm text-slate-500 mt-1">
+                        Active Order <span class="font-semibold text-slate-700">#{{ order.order_number }}</span>
+                    </div>
+                </div>
 
-    <!-- Header -->
-    <div class="flex justify-between items-center mb-4">
-        <h1 class="text-3xl font-bold">
-            Active Order #{{ order.order_number }}
-        </h1>
+                <div class="flex items-center gap-3">
+                    <a href="{% url 'pos_home' %}" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
+                        Home
+                    </a>
+                    <a href="{% url 'products' %}?order_id={{ order.id }}" class="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800">
+                        Products
+                    </a>
+                </div>
+            </div>
 
-        <div class="text-2xl font-bold">
-            Total: <span class="text-green-700">{{ total }}</span>
+            <!-- ORDERS BAR -->
+            <div class="px-6 py-3 border-b border-slate-200 bg-white">
+                <div class="flex flex-wrap items-center gap-2">
+                    {% for o in open_orders %}
+                        <a href="{% url 'pos_order' o.id %}"
+                           class="px-3 py-2 rounded-lg border text-sm font-semibold transition
+                           {% if o.id == order.id %}bg-emerald-50 text-emerald-800 border-emerald-200{% else %}bg-white text-slate-700 border-slate-200 hover:bg-slate-50{% endif %}">
+                            Order {{ o.order_number }}
+                        </a>
+                    {% endfor %}
+
+                    <a href="{% url 'create_new_order' %}"
+                       class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        + New Order
+                    </a>
+                </div>
+                <p class="mt-2 text-xs text-slate-500">Switch orders to serve multiple customers.</p>
+            </div>
+
+            <!-- ADD CUSTOM ITEM -->
+            <div class="p-6 border-b border-slate-200 bg-slate-50">
+                <div class="flex items-center justify-between gap-4 mb-4">
+                    <h2 class="text-xl font-semibold">Add Custom Item</h2>
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">One-time</span>
+                </div>
+
+                <form method="post" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    {% csrf_token %}
+
+                    <input type="text" name="item_name"
+                           placeholder="Item name"
+                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
+
+                    <input type="number" step="0.01" name="quantity"
+                           placeholder="Qty"
+                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
+
+                    <input type="number" step="0.01" name="unit_price"
+                           placeholder="Unit price"
+                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
+
+                    <button type="submit"
+                            class="bg-blue-700 text-white text-lg font-bold rounded-lg p-3 hover:bg-blue-800">
+                        Add
+                    </button>
+                </form>
+            </div>
+
+            <!-- ITEMS TABLE -->
+            <div class="flex-1 overflow-y-auto px-6 pb-6">
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm mt-6 overflow-hidden">
+                    <table class="w-full text-lg">
+                        <thead class="bg-slate-50 border-b border-slate-200 sticky top-0">
+                            <tr class="text-xs uppercase tracking-wide text-slate-500">
+                                <th class="p-3 text-left">Item</th>
+                                <th class="p-3 text-right">Qty</th>
+                                <th class="p-3 text-right">Price</th>
+                                <th class="p-3 text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            <tr class="border-b border-slate-100">
+                                <td class="p-3 font-semibold text-slate-800">{{ item.item_name }}</td>
+                                <td class="p-3 text-right">{{ item.quantity }}</td>
+                                <td class="p-3 text-right">{{ item.unit_price }}</td>
+                                <td class="p-3 text-right font-semibold text-slate-900">{{ item.line_total }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="p-10 text-center text-slate-400">
+                                    No items yet
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
+
+        <!-- ================= RIGHT PANEL ================= -->
+        <div class="w-full lg:w-[420px] flex flex-col justify-between p-6 gap-6">
+
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm uppercase tracking-wide text-slate-500">Total</span>
+                    <span class="text-3xl font-extrabold text-slate-900">{{ total }}</span>
+                </div>
+                <div class="mt-4 grid grid-cols-1 gap-3">
+                    <a href="{% url 'pay_order' order.id %}"
+                       class="bg-emerald-700 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-emerald-800 text-center">
+                        Pay
+                    </a>
+
+                    <a href="{% url 'pay_later' order.id %}"
+                       class="bg-yellow-600 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-yellow-700 text-center"
+                       onclick="return confirm('Mark this order as UNPAID and continue later?');">
+                        Pay Later
+                    </a>
+
+                    {% if order.status == 'paid' %}
+                        <a href="{% url 'refund_order' order.id %}"
+                           class="bg-red-700 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-red-800 text-center">
+                            Refund
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                <h2 class="text-lg font-semibold mb-4">Receipts</h2>
+                <div class="grid grid-cols-1 gap-3">
+                    <a href="{% url 'print_receipt' order.id 'customer' %}"
+                       target="_blank"
+                       class="bg-indigo-700 text-white px-6 py-3 rounded-lg text-lg font-bold text-center">
+                        Print Customer Copy
+                    </a>
+
+                    <a href="{% url 'print_receipt' order.id 'store' %}"
+                       target="_blank"
+                       class="bg-slate-900 text-white px-6 py-3 rounded-lg text-lg font-bold text-center">
+                        Print Store Copy
+                    </a>
+
+                    <a href="{% url 'unpaid_orders' %}"
+                       class="bg-slate-700 text-white px-6 py-3 rounded-lg text-lg font-bold hover:bg-slate-800 text-center">
+                        Unpaid Orders
+                    </a>
+                </div>
+            </div>
+
+            <div class="text-xs text-slate-400 text-center">
+                Tip: Use <span class="font-semibold">Products</span> to search and add items quickly.
+            </div>
+        </div>
+
     </div>
-
-    <!-- Action Buttons -->
-    <div class="flex flex-wrap gap-4 mb-6">
-
-        <a href="{% url 'pay_order' order.id %}"
-           class="bg-green-700 text-white px-6 py-3 rounded text-xl font-bold hover:bg-green-800">
-            PAY
-        </a>
-        {% if order.status == 'paid' %}
-    <a href="{% url 'refund_order' order.id %}"
-       class="bg-red-700 text-white px-6 py-3 rounded text-xl font-bold hover:bg-red-800">
-        REFUND
-    </a>
-{% endif %}
-
-
-        <a href="{% url 'pay_later' order.id %}"
-           class="bg-yellow-600 text-white px-6 py-3 rounded text-xl font-bold hover:bg-yellow-700"
-           onclick="return confirm('Mark this order as UNPAID and continue later?');">
-            Pay Later
-        </a>
-
-        <a href="{% url 'print_receipt' order.id 'customer' %}"
-           target="_blank"
-           class="bg-indigo-700 text-white px-6 py-3 rounded text-xl font-bold">
-            Print Customer Copy
-        </a>
-
-        <a href="{% url 'print_receipt' order.id 'store' %}"
-           target="_blank"
-           class="bg-gray-800 text-white px-6 py-3 rounded text-xl font-bold">
-            Print Store Copy
-        </a>
-
-        <a href="{% url 'unpaid_orders' %}"
-           class="bg-gray-700 text-white px-6 py-3 rounded text-xl font-bold hover:bg-gray-800">
-            Unpaid Orders
-        </a>
-
-    </div>
-
-    <!-- Add Item -->
-    <div class="bg-white p-6 rounded shadow mb-6">
-        <h2 class="text-2xl font-semibold mb-4">Add Item</h2>
-
-        <form method="post" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {% csrf_token %}
-
-            <input type="text" name="item_name"
-                   placeholder="Item name"
-                   class="border p-3 rounded text-lg" required>
-
-            <input type="number" step="0.01" name="quantity"
-                   placeholder="Quantity"
-                   class="border p-3 rounded text-lg" required>
-
-            <input type="number" step="0.01" name="unit_price"
-                   placeholder="Unit price"
-                   class="border p-3 rounded text-lg" required>
-
-            <button type="submit"
-                    class="bg-blue-700 text-white text-xl font-bold rounded p-3">
-                ADD
-            </button>
-        </form>
-    </div>
-
-    <!-- Items Table -->
-    <div class="bg-white rounded shadow">
-        <table class="w-full text-lg">
-            <thead class="bg-gray-200">
-                <tr>
-                    <th class="p-3 text-left">Item</th>
-                    <th class="p-3 text-right">Qty</th>
-                    <th class="p-3 text-right">Price</th>
-                    <th class="p-3 text-right">Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in items %}
-                <tr class="border-b">
-                    <td class="p-3">{{ item.item_name }}</td>
-                    <td class="p-3 text-right">{{ item.quantity }}</td>
-                    <td class="p-3 text-right">{{ item.unit_price }}</td>
-                    <td class="p-3 text-right">{{ item.line_total }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="4" class="p-6 text-center text-gray-500">
-                        No items yet
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
 </div>
 
 {% endblock %}

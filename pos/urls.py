@@ -6,6 +6,10 @@ urlpatterns = [
     path('order/<int:order_id>/', views.pos_home, name='pos_order'),
     path('new-order/', views.create_new_order, name='create_new_order'),
 
+    path('products/', views.products_page, name='products'),
+    path('products/create/', views.create_product, name='create_product'),
+    path('order/<int:order_id>/add-product/<int:product_id>/', views.add_product_to_order, name='add_product_to_order'),
+
     path('unpaid-orders/', views.unpaid_orders, name='unpaid_orders'),
     path('resume-order/<int:order_id>/', views.resume_order, name='resume_order'),
     path('pay-later/<int:order_id>/', views.pay_later, name='pay_later'),
