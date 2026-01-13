@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <title>Receipt</title>
 
-    <style>
+<style>
         body {
-            font-family: monospace;
-            font-size: 14px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+            color: #0f172a;
         }
 
         .center {
@@ -36,10 +37,11 @@
                 display: none;
             }
         }
-    </style>
+</style>
 </head>
 
 <body onload="window.print()">
+{% load pos_filters %}
 
 <div class="center bold">
     BUILDING MATERIALS SHOP
@@ -63,8 +65,8 @@
     {% for item in items %}
     <tr>
         <td>{{ item.item_name }}</td>
-        <td align="right">{{ item.quantity }} x {{ item.unit_price }}</td>
-        <td align="right">{{ item.line_total }}</td>
+        <td align="right">{{ item.quantity|whole }} x {{ item.selling_price|whole }}</td>
+        <td align="right">{{ item.line_total|whole }}</td>
     </tr>
     {% endfor %}
 </table>
@@ -72,7 +74,7 @@
 <div class="line"></div>
 
 <div class="bold">
-    TOTAL: {{ total }}
+    TOTAL: {{ total|whole }}
 </div>
 
 {% if payment %}
@@ -85,10 +87,10 @@
             Bank: {{ payment.bank_name }}<br>
         {% endif %}
 
-        Paid: {{ payment.amount_received }}<br>
+        Paid: {{ payment.amount_received|whole }}<br>
 
         {% if payment.method == 'cash' %}
-            Change: {{ payment.change_given }}
+            Change: {{ payment.change_given|whole }}
         {% endif %}
     </div>
 {% else %}

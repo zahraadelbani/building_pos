@@ -1,173 +1,608 @@
 {% extends "base.html" %}
-{% block nav %}{% endblock %}
+{% load pos_filters %}
+{% block nav %}
+<nav class="bg-slate-950 text-slate-100 border-b border-slate-800/70">
+    <div class="max-w-screen-2xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+            <a href="{% url 'pos_home' %}" class="text-base font-extrabold tracking-wide text-white">
+                POS
+            </a>
+            <div class="hidden md:flex items-center gap-2">
+                <span class="px-3 py-2 rounded-lg bg-slate-900 text-slate-100 border border-slate-800 text-sm font-semibold">
+                    Sale
+                </span>
+                <a href="{% url 'unpaid_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                    Unpaid
+                </a>
+                <a href="{% url 'products' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                    Products
+                </a>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <a href="{% url 'products' %}"
+               class="px-4 py-2 rounded-lg bg-slate-900 text-white border border-slate-800 font-semibold hover:bg-slate-800">
+                Catalog
+            </a>
+            <a href="{% url 'unpaid_orders' %}"
+               class="px-4 py-2 rounded-lg border border-slate-800 text-slate-200 font-semibold hover:bg-slate-900 hover:text-white">
+                Unpaid Orders
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
 {% block content %}
 
-<div class="min-h-screen bg-slate-100 text-slate-800">
-    <div class="flex flex-col lg:flex-row min-h-screen">
+<div class="min-h-[calc(100vh-72px)] bg-slate-100 text-slate-900">
+    <div class="max-w-screen-2xl mx-auto px-6 py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        <!-- ================= LEFT PANEL ================= -->
-        <div class="flex-1 flex flex-col bg-white border-r border-slate-200 shadow-sm">
+            <!-- ================= LEFT: SALE ================= -->
+            <div class="lg:col-span-8 xl:col-span-9">
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-            <!-- HEADER -->
-            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                <div>
-                    <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                        Building Materials
-                    </p>
-                    <h1 class="text-2xl md:text-3xl font-bold">Point of Sale</h1>
-                    <div class="text-sm text-slate-500 mt-1">
-                        Active Order <span class="font-semibold text-slate-700">#{{ order.order_number }}</span>
+                    <!-- HEADER -->
+                    <div class="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white">
+                        <div>
+                            <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Building Materials</div>
+                            <h1 class="text-2xl md:text-3xl font-extrabold text-slate-950 tracking-tight">Point of Sale</h1>
+                            <div class="text-sm text-slate-500 mt-1">
+                                Active Order: <span class="font-semibold text-slate-900">#{{ order.order_number }}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            {% for o in open_orders %}
+                                <a href="{% url 'pos_order' o.id %}"
+                                   class="px-3 py-2 rounded-lg border text-sm font-semibold transition
+                                   {% if o.id == order.id %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-200 hover:bg-slate-50{% endif %}">
+                                    Bill {{ o.order_number }}
+                                </a>
+                            {% endfor %}
+                            <a href="{% url 'create_new_order' %}"
+                               class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                               >
+                                + New Bill
+                            </a>
+                            {% if can_delete_order %}
+                                <form method="post" action="{% url 'delete_empty_order' order.id %}" class="inline">
+                                    {% csrf_token %}
+                                    <button type="submit"
+                                            class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-semibold hover:bg-red-100">
+                                        Delete Empty
+                                    </button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- SEARCH -->
+                    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/40">
+                        <form id="product-search-form" method="get" action="{% url 'pos_order' order.id %}" class="space-y-2">
+                            <label class="block text-sm font-semibold text-slate-700">
+                                Product search (no barcode)
+                            </label>
+                            <div class="flex flex-col md:flex-row gap-3">
+                                <input type="text"
+                                       id="product-search"
+                                       name="q"
+                                       value="{{ query }}"
+                                       autofocus
+                                       placeholder="Search product name..."
+                                       autocomplete="off"
+                                       data-search-url="{% url 'pos_order' order.id %}"
+                                       class="flex-1 border border-slate-200 px-4 py-3 rounded-xl text-base bg-white focus:outline-none focus:ring-4 focus:ring-teal-100 focus:border-teal-500">
+                            </div>
+                            <div class="text-xs text-slate-500">
+                                Enter quantity and selling price per item. Cost/profit never shows on customer receipt.
+                            </div>
+                        </form>
+
+                        <div class="mt-3 rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                            <div class="bg-slate-50 px-4 py-3 flex items-center justify-between">
+                                <div class="text-sm font-semibold text-slate-800">Selected product</div>
+                                <div class="text-xs text-slate-500">Enter qty + selling</div>
+                            </div>
+                            <div class="px-4 py-4">
+                                <div class="flex flex-col gap-3">
+                                    <div class="text-sm text-slate-600">
+                                        <span class="font-semibold text-slate-900" id="selected-product-name">None selected</span>
+                                    </div>
+
+                                    <form method="post" id="selected-add-form" action="" class="flex flex-wrap gap-3 items-end">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+                                        <div class="flex flex-col gap-1">
+                                            <label class="text-sm font-semibold text-slate-700">Quantity</label>
+                                            <input type="number" step="0.01" min="0.01" name="quantity" id="selected-qty" value="1"
+                                                   class="border border-slate-200 px-3 py-2 rounded-lg text-base w-32 bg-white"
+                                                   required>
+                                        </div>
+
+                                        <div class="flex flex-col gap-1">
+                                            <label class="text-sm font-semibold text-slate-700">Selling price</label>
+                                            <input type="number" step="0.01" min="0.01" name="selling_price" id="selected-selling"
+                                                   class="border border-slate-200 px-3 py-2 rounded-lg text-base w-40 bg-white"
+                                                   placeholder="0.00"
+                                                   required>
+                                        </div>
+
+                                        <button type="submit"
+                                                id="selected-add-btn"
+                                                disabled
+                                                class="px-5 py-2 rounded-lg bg-slate-900 text-white text-base font-extrabold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-800">
+                                            Add to bill
+                                        </button>
+                                    </form>
+
+                                    <div class="text-xs text-slate-500">Tip: search and click <span class="font-semibold">Select</span> below.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3 rounded-2xl border border-slate-200 overflow-hidden" id="product-results">
+                            {% include "pos/_product_results.html" %}
+                        </div>
+                    </div>
+
+                    <!-- ITEMS TABLE -->
+                    <div class="p-6 bg-white">
+                        <div class="rounded-2xl border border-slate-200 overflow-hidden">
+                            <div class="bg-slate-50 px-4 py-3 flex items-center justify-between">
+                                <div class="text-sm font-semibold text-slate-700">Items</div>
+                                <div class="text-xs text-slate-500">Bill #{{ order.order_number }}</div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-base">
+                                    <thead class="bg-white border-b border-slate-200">
+                                        <tr class="text-xs uppercase tracking-wide text-slate-500">
+                                            <th class="p-3 text-left">Item</th>
+                                            <th class="p-3 text-right">Qty</th>
+                                            <th class="p-3 text-right">Price</th>
+                                            <th class="p-3 text-right">Total</th>
+                                            <th class="p-3 text-right">Remove</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in items %}
+                                        <tr class="border-t border-slate-100">
+                                            <td class="p-3 font-semibold text-slate-900">
+                                                {% if item.product %}{{ item.product.name }}{% else %}{{ item.item_name }}{% endif %}
+                                            </td>
+                                            <td class="p-3 text-right text-slate-800">{{ item.quantity|whole }}</td>
+                                            <td class="p-3 text-right text-slate-800">{{ item.selling_price|whole }}</td>
+                                            <td class="p-3 text-right font-extrabold text-slate-900">{{ item.line_total|whole }}</td>
+                                            <td class="p-3 text-right">
+                                                <form method="post" action="{% url 'remove_order_item' order.id item.id %}" class="inline">
+                                                    {% csrf_token %}
+                                                    <button type="submit"
+                                                            class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-semibold hover:bg-red-100">
+                                                        Remove
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="5" class="p-10 text-center text-slate-400">
+                                                No items in this bill yet.
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- ================= RIGHT: TOTAL + ACTIONS (NO NUMPAD) ================= -->
+            <div class="lg:col-span-4 xl:col-span-3">
+                <div class="sticky top-6 space-y-6">
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div class="p-5 border-b border-slate-200">
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Subtotal</div>
+                                <div class="text-lg font-extrabold text-slate-900 tabular-nums">{{ total|whole }}</div>
+                            </div>
+                            <div class="mt-4 flex items-center justify-between">
+                                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total</div>
+                                <div class="text-3xl font-extrabold text-emerald-700 tabular-nums">{{ total|whole }}</div>
+                            </div>
+                        </div>
+                        <div class="p-5 space-y-3">
+                            <button type="button"
+                               id="pay-btn"
+                               class="block w-full text-center rounded-2xl bg-teal-700 text-white px-6 py-3 text-lg font-extrabold hover:bg-teal-800">
+                                Pay
+                            </button>
+
+                            <a href="{% url 'pay_later' order.id %}"
+                               class="block text-center rounded-2xl bg-amber-700 text-white px-6 py-3 text-base font-extrabold hover:bg-amber-800"
+                               >
+                                Pay Later
+                            </a>
+
+                            {% if order.status == 'paid' %}
+                                <a href="{% url 'refund_order' order.id %}"
+                                   class="block text-center rounded-2xl bg-red-600 text-white px-6 py-3 text-base font-extrabold hover:bg-red-700">
+                                    Refund
+                                </a>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div class="px-6 py-4 border-b border-slate-200">
+                            <div class="text-sm font-semibold text-slate-700">Receipts</div>
+                            <div class="text-xs text-slate-500">Refunded orders cannot be printed.</div>
+                        </div>
+                        <div class="p-5 grid grid-cols-1 gap-3">
+                            <form method="post" action="{% url 'print_receipt' order.id 'customer' %}">
+                                {% csrf_token %}
+                                <button type="submit"
+                                        class="w-full rounded-xl bg-slate-700 text-white px-6 py-3 text-base font-extrabold text-center hover:bg-slate-800">
+                                    Print Customer Copy
+                                </button>
+                            </form>
+
+                            <form method="post" action="{% url 'print_receipt' order.id 'store' %}">
+                                {% csrf_token %}
+                                <button type="submit"
+                                        class="w-full rounded-xl bg-slate-900 text-white px-6 py-3 text-base font-extrabold text-center hover:bg-slate-800">
+                                    Print Store Copy
+                                </button>
+                            </form>
+
+                            <form method="post" action="{% url 'print_profit_receipt' order.id %}">
+                                {% csrf_token %}
+                                <button type="submit"
+                                        class="w-full rounded-xl bg-slate-800 text-white px-6 py-3 text-base font-extrabold text-center hover:bg-slate-900">
+                                    Print Profit Copy
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="text-xs text-slate-500 text-center">
+                        Device: {% if device_id %}<span class="font-semibold">{{ device_id }}</span>{% else %}<span class="font-semibold text-red-700">NOT SET</span>{% endif %}
+                        · <a class="underline" href="{% url 'device_setup' %}">Change</a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- ================= PAYMENT MODAL ================= -->
+<div id="payment-modal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Payment</div>
+                <div class="text-lg font-extrabold text-slate-900">Order #{{ order.order_number }}</div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Multi-tender</span>
+                <button type="button" id="payment-close" class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                    Close
+                </button>
+            </div>
+        </div>
+
+        <div class="p-6">
+            <p class="mb-2 text-slate-500 text-sm">
+                Total due
+                <strong id="payment-total" class="text-slate-800 text-xl ml-2">{{ total|whole }}</strong>
+            </p>
+            <div id="payment-status" data-total="{{ total|whole }}" class="mb-4 text-sm font-semibold text-slate-700">
+                Remaining: {{ total|whole }}
+            </div>
+
+            <div id="payment-error" class="hidden mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800"></div>
+            <div id="payment-success" class="hidden mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800"></div>
+
+            <form id="payment-form" method="post" action="{% url 'pay_order' order.id %}">
+                {% csrf_token %}
+
+                <div id="payment-inputs" class="space-y-3">
+                    <div onclick="togglePay('cash')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
+                        <div class="flex items-center justify-between">
+                            <strong>Cash (Amount Given)</strong>
+                            <span class="text-xs text-slate-500">Tap to enter</span>
+                        </div>
+                        <input type="number" step="1" min="0" name="cash" id="cash-input"
+                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
+                    </div>
+
+                    <div onclick="togglePay('bank')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
+                        <div class="flex items-center justify-between">
+                            <strong>Bank Transfer</strong>
+                            <span class="text-xs text-slate-500">Enter amount + bank</span>
+                        </div>
+                        <input type="number" step="1" min="0" name="bank" id="bank-input"
+                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
+                        <input type="text" name="bank_name" id="bank-name"
+                               placeholder="Bank name"
+                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
+                    </div>
+
+                    <div onclick="togglePay('wave')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
+                        <div class="flex items-center justify-between">
+                            <strong>Wave</strong>
+                            <span class="text-xs text-slate-500">Optional</span>
+                        </div>
+                        <input type="number" step="1" min="0" name="wave" id="wave-input"
+                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
+                    </div>
+
+                    <div onclick="togglePay('aps')" class="border border-slate-200 rounded-xl p-3 mb-4 cursor-pointer hover:bg-slate-50">
+                        <div class="flex items-center justify-between">
+                            <strong>APS</strong>
+                            <span class="text-xs text-slate-500">Optional</span>
+                        </div>
+                        <input type="number" step="1" min="0" name="aps" id="aps-input"
+                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
                     </div>
                 </div>
 
-                <div class="flex items-center gap-3">
-                    <a href="{% url 'pos_home' %}" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
-                        Home
-                    </a>
-                    <a href="{% url 'products' %}?order_id={{ order.id }}" class="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800">
-                        Products
-                    </a>
-                </div>
-            </div>
-
-            <!-- ORDERS BAR -->
-            <div class="px-6 py-3 border-b border-slate-200 bg-white">
-                <div class="flex flex-wrap items-center gap-2">
-                    {% for o in open_orders %}
-                        <a href="{% url 'pos_order' o.id %}"
-                           class="px-3 py-2 rounded-lg border text-sm font-semibold transition
-                           {% if o.id == order.id %}bg-emerald-50 text-emerald-800 border-emerald-200{% else %}bg-white text-slate-700 border-slate-200 hover:bg-slate-50{% endif %}">
-                            Order {{ o.order_number }}
-                        </a>
-                    {% endfor %}
-
-                    <a href="{% url 'create_new_order' %}"
-                       class="px-3 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                        + New Order
-                    </a>
-                </div>
-                <p class="mt-2 text-xs text-slate-500">Switch orders to serve multiple customers.</p>
-            </div>
-
-            <!-- ADD CUSTOM ITEM -->
-            <div class="p-6 border-b border-slate-200 bg-slate-50">
-                <div class="flex items-center justify-between gap-4 mb-4">
-                    <h2 class="text-xl font-semibold">Add Custom Item</h2>
-                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">One-time</span>
-                </div>
-
-                <form method="post" class="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    {% csrf_token %}
-
-                    <input type="text" name="item_name"
-                           placeholder="Item name"
-                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
-
-                    <input type="number" step="0.01" name="quantity"
-                           placeholder="Qty"
-                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
-
-                    <input type="number" step="0.01" name="unit_price"
-                           placeholder="Unit price"
-                           class="border border-slate-200 p-3 rounded-lg text-lg bg-white" required>
-
-                    <button type="submit"
-                            class="bg-blue-700 text-white text-lg font-bold rounded-lg p-3 hover:bg-blue-800">
-                        Add
+                <div class="flex gap-2">
+                    <button id="confirm-payment" class="rounded-xl bg-teal-700 text-white px-6 py-3 text-base font-extrabold hover:bg-teal-800 w-full disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Confirm Payment
                     </button>
-                </form>
-            </div>
-
-            <!-- ITEMS TABLE -->
-            <div class="flex-1 overflow-y-auto px-6 pb-6">
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm mt-6 overflow-hidden">
-                    <table class="w-full text-lg">
-                        <thead class="bg-slate-50 border-b border-slate-200 sticky top-0">
-                            <tr class="text-xs uppercase tracking-wide text-slate-500">
-                                <th class="p-3 text-left">Item</th>
-                                <th class="p-3 text-right">Qty</th>
-                                <th class="p-3 text-right">Price</th>
-                                <th class="p-3 text-right">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in items %}
-                            <tr class="border-b border-slate-100">
-                                <td class="p-3 font-semibold text-slate-800">{{ item.item_name }}</td>
-                                <td class="p-3 text-right">{{ item.quantity }}</td>
-                                <td class="p-3 text-right">{{ item.unit_price }}</td>
-                                <td class="p-3 text-right font-semibold text-slate-900">{{ item.line_total }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr>
-                                <td colspan="4" class="p-10 text-center text-slate-400">
-                                    No items yet
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                    <button type="button" id="payment-cancel" class="rounded-xl border border-slate-200 bg-white text-slate-700 px-6 py-3 text-base font-extrabold hover:bg-slate-50 w-full">
+                        Cancel
+                    </button>
                 </div>
-            </div>
+            </form>
         </div>
-
-        <!-- ================= RIGHT PANEL ================= -->
-        <div class="w-full lg:w-[420px] flex flex-col justify-between p-6 gap-6">
-
-            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-                <div class="flex justify-between items-center">
-                    <span class="text-sm uppercase tracking-wide text-slate-500">Total</span>
-                    <span class="text-3xl font-extrabold text-slate-900">{{ total }}</span>
-                </div>
-                <div class="mt-4 grid grid-cols-1 gap-3">
-                    <a href="{% url 'pay_order' order.id %}"
-                       class="bg-emerald-700 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-emerald-800 text-center">
-                        Pay
-                    </a>
-
-                    <a href="{% url 'pay_later' order.id %}"
-                       class="bg-yellow-600 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-yellow-700 text-center"
-                       onclick="return confirm('Mark this order as UNPAID and continue later?');">
-                        Pay Later
-                    </a>
-
-                    {% if order.status == 'paid' %}
-                        <a href="{% url 'refund_order' order.id %}"
-                           class="bg-red-700 text-white px-6 py-3 rounded-lg text-xl font-bold hover:bg-red-800 text-center">
-                            Refund
-                        </a>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-                <h2 class="text-lg font-semibold mb-4">Receipts</h2>
-                <div class="grid grid-cols-1 gap-3">
-                    <a href="{% url 'print_receipt' order.id 'customer' %}"
-                       target="_blank"
-                       class="bg-indigo-700 text-white px-6 py-3 rounded-lg text-lg font-bold text-center">
-                        Print Customer Copy
-                    </a>
-
-                    <a href="{% url 'print_receipt' order.id 'store' %}"
-                       target="_blank"
-                       class="bg-slate-900 text-white px-6 py-3 rounded-lg text-lg font-bold text-center">
-                        Print Store Copy
-                    </a>
-
-                    <a href="{% url 'unpaid_orders' %}"
-                       class="bg-slate-700 text-white px-6 py-3 rounded-lg text-lg font-bold hover:bg-slate-800 text-center">
-                        Unpaid Orders
-                    </a>
-                </div>
-            </div>
-
-            <div class="text-xs text-slate-400 text-center">
-                Tip: Use <span class="font-semibold">Products</span> to search and add items quickly.
-            </div>
-        </div>
-
     </div>
 </div>
+
+<script>
+    (function () {
+        const input = document.getElementById("product-search");
+        if (!input) return;
+
+        const results = document.getElementById("product-results");
+        const searchUrl = input.getAttribute("data-search-url");
+        let timer = null;
+
+        const selectedName = document.getElementById("selected-product-name");
+        const selectedForm = document.getElementById("selected-add-form");
+        const selectedAddBtn = document.getElementById("selected-add-btn");
+        const selectedQty = document.getElementById("selected-qty");
+        const selectedSelling = document.getElementById("selected-selling");
+        let selectedActionUrl = "";
+
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+            }
+        });
+
+        input.addEventListener("input", function () {
+            const value = (input.value || "").trim();
+            if (timer) window.clearTimeout(timer);
+
+            timer = window.setTimeout(function () {
+                if (!results || !searchUrl) return;
+                const url = new URL(searchUrl, window.location.origin);
+                url.searchParams.set("partial", "1");
+                if (value) {
+                    url.searchParams.set("q", value);
+                }
+
+                fetch(url.toString(), { headers: { "X-Requested-With": "XMLHttpRequest" } })
+                    .then((r) => r.text())
+                    .then((html) => { results.innerHTML = html; })
+                    .catch(() => { /* keep old results */ });
+            }, 200);
+        });
+
+        if (results) {
+            results.addEventListener("click", function (e) {
+                const button = e.target.closest("[data-select-product]");
+                if (!button) return;
+
+                const productName = button.getAttribute("data-product-name") || "";
+                const actionUrl = button.getAttribute("data-action-url") || "";
+                if (!actionUrl) return;
+
+                selectedActionUrl = actionUrl;
+                if (selectedForm) selectedForm.setAttribute("action", selectedActionUrl);
+                if (selectedName) selectedName.textContent = productName || "Selected";
+                if (selectedAddBtn) selectedAddBtn.disabled = false;
+
+                if (selectedQty) selectedQty.focus();
+                if (selectedSelling) selectedSelling.value = "";
+            });
+        }
+
+        if (selectedForm) {
+            selectedForm.addEventListener("submit", function (e) {
+                if (!selectedActionUrl) {
+                    e.preventDefault();
+                }
+            });
+        }
+    })();
+</script>
+
+<script>
+    (function () {
+        const payBtn = document.getElementById("pay-btn");
+        const modal = document.getElementById("payment-modal");
+        const closeBtn = document.getElementById("payment-close");
+        const cancelBtn = document.getElementById("payment-cancel");
+        const form = document.getElementById("payment-form");
+        const statusEl = document.getElementById("payment-status");
+        const errorEl = document.getElementById("payment-error");
+        const successEl = document.getElementById("payment-success");
+        const confirmBtn = document.getElementById("confirm-payment");
+
+        const cashInput = document.getElementById("cash-input");
+        const bankInput = document.getElementById("bank-input");
+        const bankNameInput = document.getElementById("bank-name");
+        const waveInput = document.getElementById("wave-input");
+        const apsInput = document.getElementById("aps-input");
+
+        function show(el, text) {
+            if (!el) return;
+            if (text) el.textContent = text;
+            el.classList.remove("hidden");
+        }
+        function hide(el) {
+            if (!el) return;
+            el.classList.add("hidden");
+            el.textContent = "";
+        }
+
+        function openModal() {
+            if (!modal) return;
+            hide(errorEl);
+            hide(successEl);
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            updatePaymentStatus();
+        }
+
+        function closeModal() {
+            if (!modal) return;
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+
+        function num(el) {
+            const v = parseInt((el?.value || "0").toString(), 10);
+            return Number.isFinite(v) && v > 0 ? v : 0;
+        }
+
+        function updatePaymentStatus() {
+            if (!statusEl || !confirmBtn) return;
+            const total = parseInt(statusEl.dataset.total || "0", 10) || 0;
+
+            const wave = num(waveInput);
+            const aps = num(apsInput);
+            const bank = num(bankInput);
+            const cash = num(cashInput);
+
+            const nonCash = wave + aps + bank;
+            let error = "";
+            if (nonCash > total) {
+                error = "Non-cash cannot exceed total.";
+            }
+            if (bank > 0 && !(bankNameInput?.value || "").trim()) {
+                error = "Bank name is required for bank transfer.";
+            }
+
+            if (error) {
+                show(errorEl, error);
+                confirmBtn.disabled = true;
+                return;
+            }
+
+            hide(errorEl);
+
+            const cashNeeded = Math.max(0, total - nonCash);
+            const remaining = Math.max(0, cashNeeded - cash);
+            if (remaining > 0) {
+                statusEl.textContent = `Remaining: ${remaining}`;
+                statusEl.classList.remove("text-emerald-600");
+                statusEl.classList.add("text-red-600");
+                confirmBtn.disabled = true;
+                return;
+            }
+
+            const change = cash > cashNeeded ? (cash - cashNeeded) : 0;
+            if (change > 0) {
+                statusEl.textContent = `Change: ${change}`;
+            } else {
+                statusEl.textContent = "Paid in full";
+            }
+            statusEl.classList.remove("text-red-600");
+            statusEl.classList.add("text-emerald-600");
+            confirmBtn.disabled = false;
+        }
+
+        if (payBtn) payBtn.addEventListener("click", openModal);
+        if (closeBtn) closeBtn.addEventListener("click", closeModal);
+        if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+        if (modal) {
+            modal.addEventListener("click", function (e) {
+                if (e.target === modal) closeModal();
+            });
+        }
+
+        window.togglePay = function (method) {
+            const map = {
+                cash: ["cash-input"],
+                bank: ["bank-input", "bank-name"],
+                wave: ["wave-input"],
+                aps: ["aps-input"],
+            };
+            const targets = map[method] || [];
+            targets.forEach((id) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.remove("hidden");
+                el.disabled = false;
+            });
+            if (targets.length) {
+                const first = document.getElementById(targets[0]);
+                if (first) {
+                    setTimeout(() => {
+                        first.focus();
+                        first.select?.();
+                    }, 0);
+                }
+            }
+        };
+
+        [cashInput, bankInput, bankNameInput, waveInput, apsInput].forEach((el) => {
+            if (el) el.addEventListener("input", updatePaymentStatus);
+        });
+        updatePaymentStatus();
+
+        if (form) {
+            form.addEventListener("submit", function (e) {
+                e.preventDefault();
+                hide(errorEl);
+                hide(successEl);
+                confirmBtn.disabled = true;
+
+                fetch(form.action, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                    body: new FormData(form),
+                })
+                    .then(async (r) => {
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok || !data.ok) {
+                            throw new Error(data.error || "Payment failed.");
+                        }
+                        return data;
+                    })
+                    .then((data) => {
+                        const change = (data.change || "0");
+                        show(successEl, `Payment successful. Change: ${change}`);
+                        window.setTimeout(() => { window.location.href = "{% url 'pos_home' %}"; }, 800);
+                    })
+                    .catch((err) => {
+                        show(errorEl, err.message || "Payment failed.");
+                    })
+                    .finally(() => {
+                        updatePaymentStatus();
+                    });
+            });
+        }
+    })();
+</script>
 
 {% endblock %}

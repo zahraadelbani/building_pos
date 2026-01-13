@@ -3,10 +3,62 @@ from decimal import Decimal
 from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .models import Order, OrderItem, Payment, Product
+from .models import Order, OrderItem, Payment, PrintJob, Product
+from .printing import enqueue_profit_report, enqueue_refund_receipt, enqueue_sale_copy, enqueue_sale_receipt
+
+
+DEVICE_ID_SESSION_KEY = "pos_device_id"
+DEVICE_ID_COOKIE_NAME = "pos_device_id"
+DEVICE_ID_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+
+
+def get_device_id(request):
+    device_id = (request.session.get(DEVICE_ID_SESSION_KEY) or "").strip()
+    if device_id:
+        return device_id
+    return (request.COOKIES.get(DEVICE_ID_COOKIE_NAME) or "").strip() or None
+
+
+def _redirect_back(request, fallback_name="pos_home"):
+    next_url = request.META.get("HTTP_REFERER") or ""
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
+    return redirect(fallback_name)
+
+
+def _require_device_id(request):
+    device_id = get_device_id(request)
+    if not device_id:
+        messages.error(request, "Device ID is not set. Go to Device Setup first.")
+        return None
+    return device_id
+
+
+def device_setup(request):
+    current = get_device_id(request) or ""
+
+    if request.method == "POST":
+        device_id = (request.POST.get("device_id") or "").strip()
+        if not device_id:
+            messages.error(request, "Device ID is required (e.g. cashier-1).")
+            return redirect("device_setup")
+
+        request.session[DEVICE_ID_SESSION_KEY] = device_id
+        response = redirect("pos_home")
+        response.set_cookie(
+            DEVICE_ID_COOKIE_NAME,
+            device_id,
+            max_age=DEVICE_ID_COOKIE_MAX_AGE_SECONDS,
+            samesite="Lax",
+        )
+        messages.success(request, f"Device set to: {device_id}")
+        return response
+
+    return render(request, "pos/device_setup.html", {"device_id": current})
 
 
 def create_new_order(request):
@@ -26,20 +78,21 @@ def pos_home(request, order_id=None):
     else:
         order = open_orders.first()
 
-    if request.method == "POST":
-        item_name = request.POST.get("item_name", "").strip()
-        quantity = request.POST.get("quantity")
-        unit_price = request.POST.get("unit_price")
+    query = (request.GET.get("q") or "").strip()
+    products = []
+    if query:
+        products = list(Product.objects.filter(name__icontains=query).order_by("name")[:30])
 
-        if item_name and quantity and unit_price:
-            OrderItem.objects.create(
-                order=order,
-                item_name=item_name,
-                quantity=quantity,
-                unit_price=unit_price,
-            )
-
-        return redirect("pos_order", order_id=order.id)
+    if request.GET.get("partial") == "1":
+        return render(
+            request,
+            "pos/_product_results.html",
+            {
+                "order": order,
+                "query": query,
+                "products": products,
+            },
+        )
 
     return render(
         request,
@@ -49,17 +102,16 @@ def pos_home(request, order_id=None):
             "order": order,
             "items": order.items.all(),
             "total": order.total_amount(),
+            "query": query,
+            "products": products,
+            "can_delete_order": (not order.items.exists() and not order.payments.exists()),
+            "device_id": get_device_id(request),
         },
     )
 
 
 def products_page(request):
     query = (request.GET.get("q") or request.GET.get("product_q") or "").strip()
-    order_id = (request.GET.get("order_id") or "").strip()
-    order = None
-
-    if order_id:
-        order = get_object_or_404(Order, id=order_id, status="unpaid")
 
     products = Product.objects.all().order_by("name")
     if query:
@@ -71,9 +123,58 @@ def products_page(request):
         {
             "products": products,
             "query": query,
-            "order": order,
         },
     )
+
+
+def reprint_orders(request):
+    query = (request.GET.get("q") or "").strip()
+    orders = Order.objects.exclude(status="unpaid").order_by("-order_number")
+    if query:
+        orders = orders.filter(order_number__icontains=query)
+    orders = orders[:50]
+
+    return render(
+        request,
+        "pos/reprint.html",
+        {
+            "orders": orders,
+            "query": query,
+        },
+    )
+
+
+def edit_product(request, product_id):
+    product = get_object_or_404(Product, id=product_id)
+
+    if request.method == "POST":
+        name = (request.POST.get("name") or "").strip()
+        cost_price = (request.POST.get("cost_price") or "").strip()
+
+        if not name:
+            messages.error(request, "Name is required.")
+            return redirect("edit_product", product_id=product.id)
+
+        try:
+            cost_price = Decimal(cost_price)
+            if cost_price < 0:
+                raise ValueError()
+        except Exception:
+            messages.error(request, "Cost price must be a valid number (0 or more).")
+            return redirect("edit_product", product_id=product.id)
+
+        product.name = name
+        product.cost_price = cost_price
+        try:
+            product.save()
+        except IntegrityError:
+            messages.error(request, "A product with this name already exists.")
+            return redirect("edit_product", product_id=product.id)
+
+        messages.success(request, f"Updated product: {product.name}")
+        return redirect("products")
+
+    return render(request, "pos/product_edit.html", {"product": product})
 
 
 def create_product(request):
@@ -81,8 +182,7 @@ def create_product(request):
         return redirect("products")
 
     name = request.POST.get("name", "").strip()
-    unit_price = request.POST.get("unit_price", "").strip()
-    stock_quantity = request.POST.get("stock_quantity", "0").strip()
+    cost_price = request.POST.get("cost_price", "").strip()
 
     next_url = request.POST.get("next")
     if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
@@ -90,20 +190,20 @@ def create_product(request):
         if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             next_url = "/products/"
 
-    if not name or not unit_price:
-        messages.error(request, "Name and unit price are required.")
+    if not name or not cost_price:
+        messages.error(request, "Name and cost price are required.")
         return redirect(next_url)
 
     try:
-        stock_quantity = Decimal(stock_quantity)
-        if stock_quantity < 0:
+        cost_price = Decimal(cost_price)
+        if cost_price < 0:
             raise ValueError()
     except Exception:
-        messages.error(request, "Stock quantity must be a valid number (0 or more).")
+        messages.error(request, "Cost price must be a valid number (0 or more).")
         return redirect(next_url)
 
     try:
-        Product.objects.create(name=name, unit_price=unit_price, stock_quantity=stock_quantity)
+        Product.objects.create(name=name, cost_price=cost_price)
     except IntegrityError:
         messages.error(request, "A product with this name already exists.")
         return redirect(next_url)
@@ -119,38 +219,67 @@ def add_product_to_order(request, order_id, product_id):
     order = get_object_or_404(Order, id=order_id, status="unpaid")
     product = get_object_or_404(Product, id=product_id)
 
-    quantity = request.POST.get("quantity", "1")
+    quantity = request.POST.get("quantity", "").strip()
+    selling_price = request.POST.get("selling_price", "").strip()
     try:
         quantity = Decimal(quantity)
     except Exception:
-        quantity = Decimal("1")
+        quantity = Decimal("0")
 
-    if quantity <= 0:
-        quantity = Decimal("1")
+    try:
+        selling_price = Decimal(selling_price)
+    except Exception:
+        selling_price = Decimal("0")
 
-    if product.stock_quantity <= 0:
-        messages.error(request, f"{product.name} is out of stock.")
+    if quantity <= 0 or selling_price <= 0:
+        messages.error(request, "Quantity and selling price are required (must be greater than 0).")
         next_url = request.POST.get("next")
         if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             return redirect(next_url)
-        return redirect("products")
-
-    if product.default_quantity != quantity:
-        product.default_quantity = quantity
-        product.save(update_fields=["default_quantity"])
+        return redirect("pos_order", order_id=order_id)
 
     OrderItem.objects.create(
         order=order,
         product=product,
         item_name=product.name,
         quantity=quantity,
-        unit_price=product.unit_price,
+        selling_price=selling_price,
+        cost_price_snapshot=product.cost_price,
     )
 
     next_url = request.POST.get("next")
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
 
+    return redirect("pos_order", order_id=order_id)
+
+
+def delete_empty_order(request, order_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+
+    if order.items.exists() or order.payments.exists():
+        messages.error(request, "This bill cannot be deleted because it is not empty.")
+        return redirect("pos_order", order_id=order_id)
+
+    order_number = order.order_number
+    order.delete()
+    messages.success(request, f"Deleted empty bill #{order_number}.")
+    return redirect("pos_home")
+
+
+def remove_order_item(request, order_id, item_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    item = get_object_or_404(OrderItem, id=item_id, order=order)
+
+    label = item.item_name
+    item.delete()
+    messages.success(request, f"Removed item: {label}")
     return redirect("pos_order", order_id=order_id)
 
 
@@ -191,72 +320,95 @@ def pay_order(request, order_id):
     if order.status != "unpaid":
         return redirect("pos_home")
 
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     error = None
     total = order.total_amount()
     change = Decimal("0.00")
 
     if request.method == "POST":
-        method = request.POST.get("method")
-        amount_received = request.POST.get("amount_received")
         bank_name = request.POST.get("bank_name", "").strip()
 
-        try:
-            amount_received = Decimal(amount_received)
-        except Exception:
-            error = "Invalid amount entered."
+        def _d(name):
+            val = (request.POST.get(name) or "").strip()
+            if not val:
+                return Decimal("0")
+            return Decimal(val)
 
-        if not error:
-            if method == "cash":
-                if amount_received < total:
-                    error = "Amount received is LESS than total."
-                else:
-                    change = amount_received - total
+        split_cash = request.POST.get("cash") is not None
+        split_bank = request.POST.get("bank") is not None
+        split_wave = request.POST.get("wave") is not None
+        split_aps = request.POST.get("aps") is not None
+        using_split = split_cash or split_bank or split_wave or split_aps
+
+        payments_to_create = []
+        method = None
+        amount_received = None
+
+        try:
+            if using_split:
+                cash_given = _d("cash")
+                bank_amt = _d("bank")
+                wave_amt = _d("wave")
+                aps_amt = _d("aps")
+
+                if cash_given < 0 or bank_amt < 0 or wave_amt < 0 or aps_amt < 0:
+                    raise ValueError("Amounts must be 0 or more.")
+
+                non_cash = bank_amt + wave_amt + aps_amt
+                if non_cash > total:
+                    raise ValueError("Non-cash exceeds total.")
+                if bank_amt > 0 and not bank_name:
+                    raise ValueError("Bank name is required for bank transfers.")
+
+                cash_needed = total - non_cash
+                if cash_given < cash_needed:
+                    raise ValueError("Total paid is LESS than total.")
+
+                change = cash_given - cash_needed
+
+                if bank_amt > 0:
+                    payments_to_create.append(("bank", bank_amt, bank_name))
+                if wave_amt > 0:
+                    payments_to_create.append(("wave", wave_amt, None))
+                if aps_amt > 0:
+                    payments_to_create.append(("aps", aps_amt, None))
+                if cash_given > 0:
+                    payments_to_create.append(("cash", cash_given, None))
+
+                amount_received = non_cash + cash_given
+                method = "split"
             else:
-                if amount_received != total:
-                    error = "For non-cash payments, amount must equal total."
-                if method == "bank" and not bank_name:
-                    error = "Bank name is required for bank transfers."
-                change = Decimal("0.00")
+                method = request.POST.get("method")
+                amount_received = Decimal((request.POST.get("amount_received") or "").strip())
+
+                if method == "cash":
+                    if amount_received < total:
+                        raise ValueError("Amount received is LESS than total.")
+                    change = amount_received - total
+                    payments_to_create.append(("cash", amount_received, None))
+                else:
+                    if amount_received != total:
+                        raise ValueError("For non-cash payments, amount must equal total.")
+                    if method == "bank" and not bank_name:
+                        raise ValueError("Bank name is required for bank transfers.")
+                    payments_to_create.append((method, amount_received, bank_name if method == "bank" else None))
+                    change = Decimal("0.00")
+        except Exception as e:
+            error = str(e) if str(e) else "Invalid amount entered."
 
         if not error:
             try:
                 with transaction.atomic():
                     Order.objects.select_for_update().get(id=order.id)
 
-                    needed = (
-                        order.items.exclude(product__isnull=True)
-                        .values("product_id")
-                        .annotate(needed=Sum("quantity"))
-                    )
-
-                    product_ids = [row["product_id"] for row in needed]
-                    products_by_id = {
-                        p.id: p for p in Product.objects.select_for_update().filter(id__in=product_ids)
-                    }
-
-                    for row in needed:
-                        product_id = row["product_id"]
-                        required_qty = row["needed"] or Decimal("0")
-                        product = products_by_id.get(product_id)
-                        if not product:
-                            raise ValueError("Missing product for one of the line items.")
-                        if product.stock_quantity < required_qty:
-                            raise ValueError(
-                                f"Not enough stock for {product.name}. In stock: {product.stock_quantity}"
-                            )
-
-                    for row in needed:
-                        product = products_by_id[row["product_id"]]
-                        product.stock_quantity = product.stock_quantity - (row["needed"] or Decimal("0"))
-                        product.save(update_fields=["stock_quantity"])
-
-                    Payment.objects.create(
-                        order=order,
-                        method=method,
-                        bank_name=bank_name if method == "bank" else None,
-                        amount_received=amount_received,
-                        change_given=change,
-                    )
+                    for pay_method, pay_amount, pay_bank in payments_to_create:
+                        Payment.objects.create(
+                            order=order,
+                            method=pay_method,
+                            bank_name=pay_bank,
+                            amount_received=pay_amount,
+                            change_given=change if pay_method == "cash" else Decimal("0.00"),
+                        )
 
                     order.status = "paid"
                     order.is_active = False
@@ -264,6 +416,29 @@ def pay_order(request, order_id):
             except ValueError as e:
                 error = str(e)
             else:
+                device_id = get_device_id(request)
+                if device_id:
+                    enqueue_sale_receipt(order=order, target_device_id=device_id)
+                    messages.success(request, "Printing: Customer + Store receipts sent to this device.")
+                else:
+                    messages.error(
+                        request,
+                        "Payment completed, but receipts were NOT printed because Device ID is not set.",
+                    )
+
+                if is_ajax:
+                    return JsonResponse(
+                        {
+                            "ok": True,
+                            "order_id": order.id,
+                            "order_number": order.order_number,
+                            "total": str(total),
+                            "method": method,
+                            "amount_received": str(amount_received),
+                            "change": str(change),
+                        }
+                    )
+
                 return render(
                     request,
                     "pos/payment_success.html",
@@ -275,6 +450,9 @@ def pay_order(request, order_id):
                         "method": method,
                     },
                 )
+
+        if is_ajax and error:
+            return JsonResponse({"ok": False, "error": error}, status=400)
 
     return render(
         request,
@@ -293,22 +471,41 @@ def print_receipt(request, order_id, copy_type):
     if order.status == "refunded":
         return render(request, "pos/refunded_notice.html", {"order": order})
 
-    if copy_type not in ["customer", "store"]:
-        return redirect("pos_home")
+    if request.method != "POST":
+        return _redirect_back(request)
 
-    payment = order.payments.last()
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
 
-    return render(
-        request,
-        "pos/receipt.html",
-        {
-            "order": order,
-            "items": order.items.all(),
-            "payment": payment,
-            "copy_type": copy_type,
-            "total": order.total_amount(),
-        },
-    )
+    if copy_type == "customer":
+        enqueue_sale_copy(order=order, copy_type=PrintJob.COPY_CUSTOMER, target_device_id=device_id)
+        messages.success(request, "Printing: Customer receipt sent to this device.")
+    elif copy_type == "store":
+        enqueue_sale_copy(order=order, copy_type=PrintJob.COPY_STORE, target_device_id=device_id)
+        messages.success(request, "Printing: Store receipt sent to this device.")
+    else:
+        messages.error(request, "Invalid receipt type.")
+
+    return _redirect_back(request)
+
+
+def print_profit_receipt(request, order_id):
+    order = get_object_or_404(Order, id=order_id)
+
+    if order.status == "refunded":
+        return render(request, "pos/refunded_notice.html", {"order": order})
+
+    if request.method != "POST":
+        return _redirect_back(request)
+
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
+
+    enqueue_profit_report(order=order, target_device_id=device_id)
+    messages.success(request, "Printing: Profit report sent to this device (internal).")
+    return _redirect_back(request)
 
 
 def refund_order(request, order_id):
@@ -321,26 +518,19 @@ def refund_order(request, order_id):
         with transaction.atomic():
             Order.objects.select_for_update().get(id=order.id)
 
-            returned = (
-                order.items.exclude(product__isnull=True)
-                .values("product_id")
-                .annotate(qty=Sum("quantity"))
-            )
-
-            product_ids = [row["product_id"] for row in returned]
-            products_by_id = {
-                p.id: p for p in Product.objects.select_for_update().filter(id__in=product_ids)
-            }
-
-            for row in returned:
-                product = products_by_id.get(row["product_id"])
-                if product:
-                    product.stock_quantity = product.stock_quantity + (row["qty"] or Decimal("0"))
-                    product.save(update_fields=["stock_quantity"])
-
             order.status = "refunded"
             order.is_active = False
             order.save()
+
+        device_id = get_device_id(request)
+        if device_id:
+            enqueue_refund_receipt(order=order, target_device_id=device_id)
+            messages.success(request, "Printing: Refund receipts (Customer + Store) sent to this device.")
+        else:
+            messages.error(
+                request,
+                "Refund completed, but refund receipts were NOT printed because Device ID is not set.",
+            )
 
         return redirect("pos_home")
 

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, OrderItem, Payment, Product
+from .models import Order, OrderItem, Payment, PrintJob, Product
 
 
 class OrderItemInline(admin.TabularInline):
@@ -8,9 +8,11 @@ class OrderItemInline(admin.TabularInline):
     readonly_fields = ()
 
     fields = (
-        'item_name',
-        'quantity',
-        'unit_price',
+        "product",
+        "item_name",
+        "quantity",
+        "selling_price",
+        "cost_price_snapshot",
     )
 
 
@@ -45,11 +47,27 @@ class PaymentAdmin(admin.ModelAdmin):
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
-        'name',
-        'unit_price',
-        'default_quantity',
-        'stock_quantity',
-        'created_at',
+        "name",
+        "cost_price",
+        "created_at",
     )
-    search_fields = ('name',)
-    ordering = ('name',)
+    search_fields = ("name",)
+    ordering = ("name",)
+
+
+@admin.register(PrintJob)
+class PrintJobAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "status",
+        "job_type",
+        "copy_type",
+        "target_device_id",
+        "claimed_by_device_id",
+        "attempts",
+        "priority",
+        "created_at",
+    )
+    list_filter = ("status", "job_type", "copy_type")
+    search_fields = ("target_device_id", "claimed_by_device_id", "last_error")
+    ordering = ("-priority", "created_at")

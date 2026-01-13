@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Profit Copy</title>
+
+    <style>
+        body {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 13px;
+            color: #0f172a;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        .line {
+            border-top: 1px dashed #000;
+            margin: 8px 0;
+        }
+
+        table {
+            width: 100%;
+        }
+
+        td {
+            padding: 2px 0;
+            vertical-align: top;
+        }
+
+        @media print {
+            button {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body onload="window.print()">
+{% load pos_filters %}
+
+<div class="center bold">
+    BUILDING MATERIALS SHOP
+</div>
+
+<div class="center bold">
+    PROFIT COPY (INTERNAL ONLY)
+</div>
+
+<div class="line"></div>
+
+<div>
+    Order #: {{ order.order_number }}<br>
+    Date: {{ order.created_at|date:"Y-m-d H:i" }}<br>
+    Status: <strong>{{ order.status|upper }}</strong>
+</div>
+
+<div class="line"></div>
+
+<table>
+    {% for item in items %}
+    <tr>
+        <td>{{ item.item_name }}</td>
+        <td align="right">
+            Qty: {{ item.quantity|whole }}<br>
+            Sell: {{ item.selling_price|whole }}<br>
+            Cost: {{ item.cost_price_snapshot|whole }}
+        </td>
+        <td align="right">
+            Profit: {{ item.line_profit|whole }}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+
+<div class="line"></div>
+
+<div class="bold">
+    TOTAL PROFIT: {{ total_profit|whole }}
+</div>
+<div class="bold">
+    ORDER TOTAL: {{ total|whole }}
+</div>
+
+{% if payment %}
+    <div class="line"></div>
+
+    <div>
+        Payment: {{ payment.method|upper }}<br>
+
+        {% if payment.method == 'bank' %}
+            Bank: {{ payment.bank_name }}<br>
+        {% endif %}
+
+        Paid: {{ payment.amount_received|whole }}<br>
+
+        {% if payment.method == 'cash' %}
+            Change: {{ payment.change_given|whole }}
+        {% endif %}
+    </div>
+{% else %}
+    <div class="line"></div>
+    <div class="bold">
+        *** UNPAID ***
+    </div>
+{% endif %}
+
+<div class="line"></div>
+
+<div class="center">
+    INTERNAL USE ONLY
+</div>
+
+</body>
+</html>

@@ -9,35 +9,55 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        /* Extra safety: larger fonts for POS */
         body {
-            font-size: 18px;
+            font-size: 16px;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
         }
     </style>
 </head>
-<body class="bg-gray-100 text-gray-900">
+<body class="bg-slate-100 text-slate-900 antialiased">
 
     {% block nav %}
-        <nav class="bg-white border-b border-gray-200">
-            <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap gap-4 items-center">
-                <a href="{% url 'pos_home' %}" class="text-xl font-bold text-gray-900 hover:text-blue-700">
-                    POS
-                </a>
-                <a href="{% url 'products' %}" class="text-lg font-semibold text-gray-700 hover:text-blue-700">
-                    Products
-                </a>
-                <a href="{% url 'unpaid_orders' %}" class="text-lg font-semibold text-gray-700 hover:text-blue-700">
-                    Unpaid Orders
-                </a>
+        <nav class="bg-slate-950 text-slate-100 border-b border-slate-800/70">
+            <div class="max-w-screen-2xl mx-auto px-6 py-4 flex flex-wrap gap-4 items-center justify-between">
+                <div class="flex items-center gap-6">
+                    <a href="{% url 'pos_home' %}" class="text-base font-extrabold tracking-wide text-slate-100 hover:text-white">
+                        BUILDING POS
+                    </a>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <a href="{% url 'pos_home' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                            POS
+                        </a>
+                        <a href="{% url 'products' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                            Products
+                        </a>
+                        <a href="{% url 'unpaid_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                            Unpaid
+                        </a>
+                        <a href="{% url 'reprint_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                            Reprint
+                        </a>
+                        <a href="{% url 'device_setup' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
+                            Device
+                        </a>
+                    </div>
+                </div>
+
+                <div class="text-xs text-slate-400 hidden md:block">
+                    Industrial POS · LAN printing
+                </div>
             </div>
         </nav>
     {% endblock %}
 
     {% if messages %}
-        <div class="max-w-7xl mx-auto px-6 pt-4">
+        <div id="flash-messages" class="fixed top-16 right-4 space-y-3 z-50">
             {% for message in messages %}
-                <div class="mb-3 rounded border px-4 py-3 text-base font-semibold
-                    {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">
+                <div
+                    class="flash-message px-5 py-4 rounded-xl text-sm font-semibold shadow-xl border transition-opacity duration-500 backdrop-blur
+                    {% if message.tags == 'error' %}bg-red-900/95 border-red-800 text-white{% elif message.tags == 'warning' %}bg-amber-800/95 border-amber-700 text-white{% else %}bg-slate-900/95 border-slate-700 text-white{% endif %}"
+                    data-alert-level="{{ message.tags|default:'' }}"
+                >
                     {{ message }}
                 </div>
             {% endfor %}
@@ -46,6 +66,28 @@
 
     {% block content %}
     {% endblock %}
+
+    <script>
+        (function () {
+            const container = document.getElementById("flash-messages");
+            if (!container) return;
+
+            const messages = Array.from(container.querySelectorAll(".flash-message"));
+            if (!messages.length) return;
+
+            const hideAfterMs = 3500;
+            const fadeMs = 500;
+
+            window.setTimeout(function () {
+                messages.forEach(function (el) {
+                    el.style.opacity = "0";
+                    window.setTimeout(function () {
+                        if (el && el.parentNode) el.parentNode.removeChild(el);
+                    }, fadeMs);
+                });
+            }, hideAfterMs);
+        })();
+    </script>
 
 </body>
 </html>

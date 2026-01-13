@@ -1,0 +1,29 @@
+{% if not query %}
+{% else %}
+    <div class="bg-slate-50 px-4 py-3 flex items-center justify-between">
+        <div class="text-sm font-semibold text-slate-700">
+            Matches for “{{ query }}”
+        </div>
+        <div class="text-xs text-slate-500">Max 30</div>
+    </div>
+    <div class="max-h-72 overflow-y-auto bg-white">
+        {% for p in products %}
+            <div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-base font-semibold text-slate-900 truncate">{{ p.name }}</div>
+                </div>
+                <button type="button"
+                        data-select-product="1"
+                        data-product-name="{{ p.name }}"
+                        data-action-url="{% url 'add_product_to_order' order.id p.id %}"
+                        class="shrink-0 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50">
+                    Select
+                </button>
+            </div>
+        {% empty %}
+            <div class="px-6 py-8 text-center text-slate-500">
+                No matching products.
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}

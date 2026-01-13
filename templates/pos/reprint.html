@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load pos_filters %}
+{% block content %}
+
+<div class="max-w-6xl mx-auto p-6">
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-bold">Reprint</h1>
+                <p class="text-sm text-slate-500">Find a paid order and print store/profit copies.</p>
+            </div>
+            <a href="{% url 'pos_home' %}"
+               class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
+                Back to POS
+            </a>
+        </div>
+
+        <div class="p-6 border-b border-slate-200 bg-slate-50">
+            <form method="get" class="flex gap-3 items-center">
+                <input type="text" name="q" value="{{ query }}" placeholder="Search order number"
+                       class="flex-1 border border-slate-200 p-3 rounded-lg text-lg bg-white">
+                <button class="bg-slate-900 text-white px-5 py-3 rounded-lg text-lg font-bold hover:bg-slate-800">
+                    Search
+                </button>
+            </form>
+            <div class="text-xs text-slate-500 mt-2">Shows the most recent 50 paid/refunded orders.</div>
+        </div>
+
+        <div class="p-6">
+            <div class="rounded-2xl border border-slate-200 overflow-hidden">
+                <table class="w-full text-base">
+                    <thead class="bg-slate-50 border-b border-slate-200">
+                        <tr class="text-xs uppercase tracking-wide text-slate-500">
+                            <th class="p-3 text-left">Order</th>
+                            <th class="p-3 text-left">Date</th>
+                            <th class="p-3 text-left">Status</th>
+                            <th class="p-3 text-right">Total</th>
+                            <th class="p-3 text-center">Print</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for o in orders %}
+                        <tr class="border-t border-slate-100">
+                            <td class="p-3 font-semibold text-slate-900">#{{ o.order_number }}</td>
+                            <td class="p-3 text-slate-700">{{ o.created_at|date:"Y-m-d H:i" }}</td>
+                            <td class="p-3">
+                                {% if o.status == 'refunded' %}
+                                    <span class="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">REFUNDED</span>
+                                {% else %}
+                                    <span class="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">PAID</span>
+                                {% endif %}
+                            </td>
+                            <td class="p-3 text-right font-semibold text-slate-900">{{ o.total_amount|whole }}</td>
+                            <td class="p-3">
+                                {% if o.status == 'refunded' %}
+                                    <div class="text-center text-xs text-slate-400">Printing disabled</div>
+                                {% else %}
+                                    <div class="flex flex-wrap justify-center gap-2">
+                                        <form method="post" action="{% url 'print_receipt' o.id 'store' %}">
+                                            {% csrf_token %}
+                                            <button class="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-extrabold hover:bg-slate-800">
+                                                Store
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'print_profit_receipt' o.id %}">
+                                            {% csrf_token %}
+                                            <button class="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-extrabold hover:bg-slate-900">
+                                                Profit
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'print_receipt' o.id 'customer' %}">
+                                            {% csrf_token %}
+                                            <button class="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm font-extrabold hover:bg-slate-800">
+                                                Customer
+                                            </button>
+                                        </form>
+                                    </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="p-10 text-center text-slate-400">
+                                No paid orders found.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
