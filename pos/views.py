@@ -221,6 +221,9 @@ def add_product_to_order(request, order_id, product_id):
 
     quantity = request.POST.get("quantity", "").strip()
     selling_price = request.POST.get("selling_price", "").strip()
+    box = (request.POST.get("box") or "").strip()
+    if len(box) > 50:
+        box = box[:50]
     try:
         quantity = Decimal(quantity)
     except Exception:
@@ -244,6 +247,7 @@ def add_product_to_order(request, order_id, product_id):
         item_name=product.name,
         quantity=quantity,
         selling_price=selling_price,
+        box=box or None,
         cost_price_snapshot=product.cost_price,
     )
 
@@ -419,11 +423,11 @@ def pay_order(request, order_id):
                 device_id = get_device_id(request)
                 if device_id:
                     enqueue_sale_receipt(order=order, target_device_id=device_id)
-                    messages.success(request, "Printing: Customer + Store receipts sent to this device.")
+                    messages.success(request, "Printing: Customer receipt sent to this device.")
                 else:
                     messages.error(
                         request,
-                        "Payment completed, but receipts were NOT printed because Device ID is not set.",
+                        "Payment completed, but receipt was NOT printed because Device ID is not set.",
                     )
 
                 if is_ajax:
@@ -478,14 +482,13 @@ def print_receipt(request, order_id, copy_type):
     if not device_id:
         return redirect("device_setup")
 
-    if copy_type == "customer":
-        enqueue_sale_copy(order=order, copy_type=PrintJob.COPY_CUSTOMER, target_device_id=device_id)
-        messages.success(request, "Printing: Customer receipt sent to this device.")
-    elif copy_type == "store":
-        enqueue_sale_copy(order=order, copy_type=PrintJob.COPY_STORE, target_device_id=device_id)
-        messages.success(request, "Printing: Store receipt sent to this device.")
-    else:
-        messages.error(request, "Invalid receipt type.")
+    copy_type = (copy_type or "").lower()
+    if copy_type != "customer":
+        messages.error(request, "Store copy has been removed. Only the customer receipt can be printed.")
+        return _redirect_back(request)
+
+    enqueue_sale_copy(order=order, copy_type=PrintJob.COPY_CUSTOMER, target_device_id=device_id)
+    messages.success(request, "Printing: Customer receipt sent to this device.")
 
     return _redirect_back(request)
 
@@ -525,11 +528,11 @@ def refund_order(request, order_id):
         device_id = get_device_id(request)
         if device_id:
             enqueue_refund_receipt(order=order, target_device_id=device_id)
-            messages.success(request, "Printing: Refund receipts (Customer + Store) sent to this device.")
+            messages.success(request, "Printing: Refund receipt sent to this device.")
         else:
             messages.error(
                 request,
-                "Refund completed, but refund receipts were NOT printed because Device ID is not set.",
+                "Refund completed, but refund receipt was NOT printed because Device ID is not set.",
             )
 
         return redirect("pos_home")

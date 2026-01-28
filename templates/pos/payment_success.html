@@ -39,7 +39,7 @@
 
         <div class="mt-6 grid grid-cols-1 gap-3">
             <div class="text-sm text-slate-600">
-                Receipts print automatically after payment (requires Device ID).
+                Customer receipt prints automatically after payment (requires Device ID).
             </div>
 
             <form method="post" action="{% url 'print_receipt' order.id 'customer' %}">
@@ -47,14 +47,6 @@
                 <button type="submit"
                         class="bg-slate-700 text-white px-8 py-4 rounded-xl text-lg font-extrabold w-full hover:bg-slate-800">
                     PRINT CUSTOMER COPY
-                </button>
-            </form>
-
-            <form method="post" action="{% url 'print_receipt' order.id 'store' %}">
-                {% csrf_token %}
-                <button type="submit"
-                        class="bg-slate-900 text-white px-8 py-4 rounded-xl text-lg font-extrabold w-full hover:bg-slate-800">
-                    PRINT STORE COPY
                 </button>
             </form>
 

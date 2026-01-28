@@ -24,12 +24,49 @@
             margin: 8px 0;
         }
 
+        .meta {
+            margin: 8px 0;
+            font-size: 12px;
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
         table {
             width: 100%;
         }
 
+        .right {
+            text-align: right;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+
+        .muted {
+            color: #475569;
+            font-size: 12px;
+        }
+
+        table.items th {
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+
         td {
             padding: 2px 0;
+        }
+
+        th,
+        td {
+            vertical-align: top;
         }
 
         @media print {
@@ -43,68 +80,97 @@
 <body onload="window.print()">
 {% load pos_filters %}
 
-<div class="center bold">
-    BUILDING MATERIALS SHOP
-</div>
+{% with has_box=items|any_box %}
+    <div class="center bold">
+        BUILDING MATERIALS SHOP
+    </div>
 
-<div class="center">
-    {{ copy_type|upper }} COPY
-</div>
+    <div class="center">
+        {% if copy_type %}{{ copy_type|upper }} COPY{% else %}CUSTOMER COPY{% endif %}
+    </div>
 
-<div class="line"></div>
+    <div class="meta">
+        <div class="meta-row">
+            <span class="muted">Date</span>
+            <span>{{ order.created_at|date:"Y-m-d H:i" }}</span>
+        </div>
+        <div class="meta-row">
+            <span class="muted">Order</span>
+            <span>#{{ order.order_number }}</span>
+        </div>
+    </div>
 
-<div>
-    Order #: {{ order.order_number }}<br>
-    Date: {{ order.created_at|date:"Y-m-d H:i" }}<br>
-    Status: <strong>{{ order.status|upper }}</strong>
-</div>
-
-<div class="line"></div>
-
-<table>
-    {% for item in items %}
-    <tr>
-        <td>{{ item.item_name }}</td>
-        <td align="right">{{ item.quantity|whole }} x {{ item.selling_price|whole }}</td>
-        <td align="right">{{ item.line_total|whole }}</td>
-    </tr>
-    {% endfor %}
-</table>
-
-<div class="line"></div>
-
-<div class="bold">
-    TOTAL: {{ total|whole }}
-</div>
-
-{% if payment %}
     <div class="line"></div>
 
-    <div>
-        Payment: {{ payment.method|upper }}<br>
+    <table class="items">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th class="right">Qty</th>
+                {% if has_box %}<th class="right">Box</th>{% endif %}
+                <th class="right">Price</th>
+                <th class="right">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+                <tr>
+                    <td>{{ item.item_name }}</td>
+                    <td class="right">{{ item.quantity|whole }}</td>
+                    {% if has_box %}
+                        <td class="right">{% if item.box %}{{ item.box }}{% endif %}</td>
+                    {% endif %}
+                    <td class="right">{{ item.selling_price|whole }}</td>
+                    <td class="right">{{ item.line_total|whole }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 
-        {% if payment.method == 'bank' %}
-            Bank: {{ payment.bank_name }}<br>
-        {% endif %}
-
-        Paid: {{ payment.amount_received|whole }}<br>
-
-        {% if payment.method == 'cash' %}
-            Change: {{ payment.change_given|whole }}
-        {% endif %}
-    </div>
-{% else %}
     <div class="line"></div>
-    <div class="bold">
-        *** UNPAID ***
+
+    <div class="total-row bold">
+        <span>Total</span>
+        <span>{{ total|whole }}</span>
     </div>
-{% endif %}
 
-<div class="line"></div>
+    {% if payment %}
+        <div class="line"></div>
+        <div class="meta">
+            <div class="meta-row">
+                <span class="muted">Payment</span>
+                <span>{{ payment.method|upper }}</span>
+            </div>
+            {% if payment.method == 'bank' and payment.bank_name %}
+                <div class="meta-row">
+                    <span class="muted">Bank</span>
+                    <span>{{ payment.bank_name }}</span>
+                </div>
+            {% endif %}
+            <div class="meta-row">
+                <span class="muted">Paid</span>
+                <span>{{ payment.amount_received|whole }}</span>
+            </div>
+            {% if payment.method == 'cash' and payment.change_given %}
+                <div class="meta-row">
+                    <span class="muted">Change</span>
+                    <span>{{ payment.change_given|whole }}</span>
+                </div>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="line"></div>
+        <div class="bold">
+            *** UNPAID ***
+        </div>
+    {% endif %}
 
-<div class="center">
-    Thank you
-</div>
+    <div class="line"></div>
+
+    <div class="center">
+        thank you!
+    </div>
+{% endwith %}
 
 </body>
 </html>

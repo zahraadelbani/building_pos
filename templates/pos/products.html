@@ -2,6 +2,21 @@
 {% load pos_filters %}
 {% block content %}
 
+<style>
+    .products-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    @media (min-width: 900px) {
+        .products-layout {
+            grid-template-columns: 1fr 2fr;
+        }
+        .products-left { grid-column: 1; }
+        .products-right { grid-column: 2; }
+    }
+</style>
+
 <div class="max-w-7xl mx-auto p-6">
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -18,8 +33,8 @@
             </div>
         </div>
 
-        <div class="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-1">
+        <div class="p-6 products-layout">
+            <div class="products-left">
                 <div class="bg-slate-50 rounded-xl border border-slate-200 p-5">
                     <h2 class="text-lg font-extrabold mb-4 text-slate-900">Add Product</h2>
                     <form method="post" action="{% url 'create_product' %}" class="space-y-3">
@@ -45,7 +60,7 @@
                 </div>
             </div>
 
-            <div class="lg:col-span-2">
+            <div class="products-right">
                 <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
                     <div class="p-4 border-b border-slate-200 bg-white">
                         <form method="get" class="flex gap-3 items-center">
