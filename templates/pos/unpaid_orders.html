@@ -57,6 +57,22 @@
     </table>
     </div>
 
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="mt-4 flex items-center justify-between text-sm text-slate-600">
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        <div class="flex items-center gap-2">
+            {% if page_obj.has_previous %}
+                <a class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50"
+                   href="?q={{ query }}&page={{ page_obj.previous_page_number }}">Prev</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+                <a class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50"
+                   href="?q={{ query }}&page={{ page_obj.next_page_number }}">Next</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 
 {% endblock %}
