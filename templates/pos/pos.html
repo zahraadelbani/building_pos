@@ -3,11 +3,11 @@
 {% block nav %}
 <nav class="bg-slate-950 text-slate-100 border-b border-slate-800/70">
     <div class="max-w-screen-2xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4 flex-wrap">
             <a href="{% url 'pos_home' %}" class="text-base font-extrabold tracking-wide text-white">
                 POS
             </a>
-            <div class="hidden md:flex items-center gap-2">
+            <div class="flex items-center gap-2">
                 <span class="px-3 py-2 rounded-lg bg-slate-900 text-slate-100 border border-slate-800 text-sm font-semibold">
                     Sale
                 </span>
@@ -35,12 +35,32 @@
 {% endblock %}
 {% block content %}
 
+<style>
+    /* Force two-column layout on wider screens even without utility cache */
+    .pos-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    @media (min-width: 900px) {
+        .pos-layout {
+            grid-template-columns: 2fr 1fr;
+        }
+        .pos-main {
+            grid-column: 1;
+        }
+        .pos-side {
+            grid-column: 2;
+        }
+    }
+</style>
+
 <div class="min-h-[calc(100vh-72px)] bg-slate-100 text-slate-900">
     <div class="max-w-screen-2xl mx-auto px-6 py-6">
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="pos-layout">
 
             <!-- ================= LEFT: SALE ================= -->
-            <div class="lg:col-span-8 xl:col-span-9">
+            <div class="pos-main">
                 <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
                     <!-- HEADER -->
@@ -82,7 +102,7 @@
                     <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/40">
                         <form id="product-search-form" method="get" action="{% url 'pos_order' order.id %}" class="space-y-2">
                             <label class="block text-sm font-semibold text-slate-700">
-                                Product search (no barcode)
+                                Product search
                             </label>
                             <div class="flex flex-col md:flex-row gap-3">
                                 <input type="text"
@@ -130,6 +150,13 @@
                                                    required>
                                         </div>
 
+                                        <div class="flex flex-col gap-1">
+                                            <label class="text-sm font-semibold text-slate-700">Box (optional)</label>
+                                            <input type="text" name="box" id="selected-box" maxlength="50"
+                                                   class="border border-slate-200 px-3 py-2 rounded-lg text-base w-40 bg-white"
+                                                   placeholder="">
+                                        </div>
+
                                         <button type="submit"
                                                 id="selected-add-btn"
                                                 disabled
@@ -161,6 +188,7 @@
                                         <tr class="text-xs uppercase tracking-wide text-slate-500">
                                             <th class="p-3 text-left">Item</th>
                                             <th class="p-3 text-right">Qty</th>
+                                            <th class="p-3 text-right">Box</th>
                                             <th class="p-3 text-right">Price</th>
                                             <th class="p-3 text-right">Total</th>
                                             <th class="p-3 text-right">Remove</th>
@@ -173,6 +201,13 @@
                                                 {% if item.product %}{{ item.product.name }}{% else %}{{ item.item_name }}{% endif %}
                                             </td>
                                             <td class="p-3 text-right text-slate-800">{{ item.quantity|whole }}</td>
+                                            <td class="p-3 text-right text-slate-800">
+                                                {% if item.box %}
+                                                    {{ item.box }}
+                                                {% else %}
+                                                    <span class="text-slate-400">-</span>
+                                                {% endif %}
+                                            </td>
                                             <td class="p-3 text-right text-slate-800">{{ item.selling_price|whole }}</td>
                                             <td class="p-3 text-right font-extrabold text-slate-900">{{ item.line_total|whole }}</td>
                                             <td class="p-3 text-right">
@@ -187,7 +222,7 @@
                                         </tr>
                                         {% empty %}
                                         <tr>
-                                            <td colspan="5" class="p-10 text-center text-slate-400">
+                                            <td colspan="6" class="p-10 text-center text-slate-400">
                                                 No items in this bill yet.
                                             </td>
                                         </tr>
@@ -202,7 +237,7 @@
             </div>
 
             <!-- ================= RIGHT: TOTAL + ACTIONS (NO NUMPAD) ================= -->
-            <div class="lg:col-span-4 xl:col-span-3">
+            <div class="pos-side">
                 <div class="sticky top-6 space-y-6">
                     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                         <div class="p-5 border-b border-slate-200">
@@ -248,14 +283,6 @@
                                 <button type="submit"
                                         class="w-full rounded-xl bg-slate-700 text-white px-6 py-3 text-base font-extrabold text-center hover:bg-slate-800">
                                     Print Customer Copy
-                                </button>
-                            </form>
-
-                            <form method="post" action="{% url 'print_receipt' order.id 'store' %}">
-                                {% csrf_token %}
-                                <button type="submit"
-                                        class="w-full rounded-xl bg-slate-900 text-white px-6 py-3 text-base font-extrabold text-center hover:bg-slate-800">
-                                    Print Store Copy
                                 </button>
                             </form>
 
@@ -379,6 +406,7 @@
         const selectedAddBtn = document.getElementById("selected-add-btn");
         const selectedQty = document.getElementById("selected-qty");
         const selectedSelling = document.getElementById("selected-selling");
+        const selectedBox = document.getElementById("selected-box");
         let selectedActionUrl = "";
 
         input.addEventListener("keydown", function (e) {
@@ -422,6 +450,7 @@
 
                 if (selectedQty) selectedQty.focus();
                 if (selectedSelling) selectedSelling.value = "";
+                if (selectedBox) selectedBox.value = "";
             });
         }
 

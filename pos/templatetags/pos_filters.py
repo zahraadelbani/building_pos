@@ -16,3 +16,13 @@ def whole(value):
     except Exception:
         return str(value)
 
+
+@register.filter(name="any_box")
+def any_box(items):
+    try:
+        for item in items:
+            if str(getattr(item, "box", "") or "").strip():
+                return True
+    except Exception:
+        return False
+    return False

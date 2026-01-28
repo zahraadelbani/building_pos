@@ -47,6 +47,65 @@ def _line_lr(left: str, right: str, width: int) -> str:
     return f"{left}{' ' * space}{right}"
 
 
+def _has_box(items) -> bool:
+    try:
+        return any(_text(getattr(item, "box", "")) for item in items)
+    except Exception:
+        return False
+
+
+def _format_sale_row(name, qty, price, total, *, box=None, has_box=False, width: int = LINE_WIDTH_80MM) -> str:
+    if has_box:
+        item_w, qty_w, box_w, price_w, total_w = (20, 6, 8, 7, 7)
+        return (
+            _truncate(name, item_w).ljust(item_w)
+            + _text(qty).rjust(qty_w)
+            + _text(box or "").rjust(box_w)
+            + _text(price).rjust(price_w)
+            + _text(total).rjust(total_w)
+        )[:width]
+
+    item_w, qty_w, price_w, total_w = (26, 6, 8, 8)
+    return (
+        _truncate(name, item_w).ljust(item_w)
+        + _text(qty).rjust(qty_w)
+        + _text(price).rjust(price_w)
+        + _text(total).rjust(total_w)
+    )[:width]
+
+
+def _format_profit_row(
+    name,
+    qty,
+    cost,
+    price,
+    total,
+    *,
+    box=None,
+    has_box=False,
+    width: int = LINE_WIDTH_80MM,
+) -> str:
+    if has_box:
+        item_w, qty_w, box_w, cost_w, price_w, total_w = (16, 5, 7, 7, 7, 6)
+        return (
+            _truncate(name, item_w).ljust(item_w)
+            + _text(qty).rjust(qty_w)
+            + _text(box or "").rjust(box_w)
+            + _text(cost).rjust(cost_w)
+            + _text(price).rjust(price_w)
+            + _text(total).rjust(total_w)
+        )[:width]
+
+    item_w, qty_w, cost_w, price_w, total_w = (20, 6, 7, 7, 8)
+    return (
+        _truncate(name, item_w).ljust(item_w)
+        + _text(qty).rjust(qty_w)
+        + _text(cost).rjust(cost_w)
+        + _text(price).rjust(price_w)
+        + _text(total).rjust(total_w)
+    )[:width]
+
+
 def sale_receipt_text(
     *,
     order,
@@ -56,20 +115,33 @@ def sale_receipt_text(
     payments=None,
     width: int = LINE_WIDTH_80MM,
 ) -> str:
+    items = list(items)
+    has_box = _has_box(items)
     lines = []
     lines.append(_center("BUILDING MATERIALS SHOP", width))
     lines.append(_center(f"{copy_label} COPY", width))
     lines.append(_hr(width))
-    lines.append(_line_lr("Order #", str(order.order_number), width))
     created = timezone.localtime(order.created_at) if order.created_at else timezone.now()
     lines.append(_line_lr("Date", created.strftime("%Y-%m-%d %H:%M"), width))
+    lines.append(_line_lr("Order #", str(order.order_number), width))
+    lines.append(_hr(width))
+
+    header_box = "Box" if has_box else None
+    lines.append(_format_sale_row("Item", "Qty", "Price", "Total", box=header_box, has_box=has_box, width=width))
     lines.append(_hr(width))
 
     for item in items:
-        name = _text(item.item_name)
-        lines.append(_truncate(name, width))
-        detail = f"{_money(item.quantity)} x {_money(item.selling_price)}"
-        lines.append(_line_lr(detail, _money(item.line_total()), width))
+        lines.append(
+            _format_sale_row(
+                _text(item.item_name),
+                _money(item.quantity),
+                _money(item.selling_price),
+                _money(item.line_total()),
+                box=_text(getattr(item, "box", "")) if has_box else None,
+                has_box=has_box,
+                width=width,
+            )
+        )
 
     lines.append(_hr(width))
     lines.append(_line_lr("TOTAL", _money(total), width))
@@ -102,6 +174,8 @@ def refund_receipt_text(
     payments=None,
     width: int = LINE_WIDTH_80MM,
 ) -> str:
+    items = list(items)
+    has_box = _has_box(items)
     lines = []
     lines.append(_center("BUILDING MATERIALS SHOP", width))
     lines.append(_center("REFUND RECEIPT", width))
@@ -112,11 +186,22 @@ def refund_receipt_text(
     lines.append(_line_lr("Original", created.strftime("%Y-%m-%d %H:%M"), width))
     lines.append(_hr(width))
 
+    header_box = "Box" if has_box else None
+    lines.append(_format_sale_row("Item", "Qty", "Price", "Total", box=header_box, has_box=has_box, width=width))
+    lines.append(_hr(width))
+
     for item in items:
-        name = _text(item.item_name)
-        lines.append(_truncate(name, width))
-        detail = f"{_money(item.quantity)} x {_money(item.selling_price)}"
-        lines.append(_line_lr(detail, _money(item.line_total()), width))
+        lines.append(
+            _format_sale_row(
+                _text(item.item_name),
+                _money(item.quantity),
+                _money(item.selling_price),
+                _money(item.line_total()),
+                box=_text(getattr(item, "box", "")) if has_box else None,
+                has_box=has_box,
+                width=width,
+            )
+        )
 
     lines.append(_hr(width))
     lines.append(_line_lr("REFUND TOTAL", _money(total), width))
@@ -141,6 +226,8 @@ def refund_receipt_text(
 
 
 def profit_report_text(*, order, items, total, total_profit, width: int = LINE_WIDTH_80MM) -> str:
+    items = list(items)
+    has_box = _has_box(items)
     lines = []
     lines.append(_center("BUILDING MATERIALS SHOP", width))
     lines.append(_center("PROFIT REPORT (INTERNAL)", width))
@@ -150,15 +237,38 @@ def profit_report_text(*, order, items, total, total_profit, width: int = LINE_W
     lines.append(_line_lr("Date", created.strftime("%Y-%m-%d %H:%M"), width))
     lines.append(_hr(width))
 
+    header_box = "Box" if has_box else None
+    lines.append(
+        _format_profit_row(
+            "Item",
+            "Qty",
+            "Cost",
+            "Price",
+            "Total",
+            box=header_box,
+            has_box=has_box,
+            width=width,
+        )
+    )
+    lines.append(_hr(width))
+
     for item in items:
-        name = _text(item.item_name)
-        lines.append(_truncate(name, width))
-        detail = f"Qty {_money(item.quantity)}  Sell {_money(item.selling_price)}  Cost {_money(item.cost_price_snapshot)}"
-        lines.append(_truncate(detail, width))
+        lines.append(
+            _format_profit_row(
+                _text(item.item_name),
+                _money(item.quantity),
+                _money(item.cost_price_snapshot),
+                _money(item.selling_price),
+                _money(item.line_total()),
+                box=_text(getattr(item, "box", "")) if has_box else None,
+                has_box=has_box,
+                width=width,
+            )
+        )
         lines.append(_line_lr("Profit", _money(item.line_profit()), width))
 
     lines.append(_hr(width))
-    lines.append(_line_lr("TOTAL PROFIT", _money(total_profit), width))
-    lines.append(_line_lr("ORDER TOTAL", _money(total), width))
+    lines.append(_line_lr("TOTAL", _money(total), width))
+    lines.append(_line_lr("PROFIT", _money(total_profit), width))
     lines.append("\n\n")
     return "\n".join(lines)

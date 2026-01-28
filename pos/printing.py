@@ -17,14 +17,6 @@ def enqueue_sale_receipt(*, order, target_device_id: str):
         payments=payments,
         width=LINE_WIDTH_80MM,
     )
-    store_text = sale_receipt_text(
-        order=order,
-        items=items,
-        total=total,
-        copy_label="STORE",
-        payments=payments,
-        width=LINE_WIDTH_80MM,
-    )
 
     with transaction.atomic():
         PrintJob.objects.create(
@@ -34,20 +26,16 @@ def enqueue_sale_receipt(*, order, target_device_id: str):
             target_device_id=target_device_id,
             priority=10,
         )
-        PrintJob.objects.create(
-            job_type=PrintJob.JOB_SALE_RECEIPT,
-            copy_type=PrintJob.COPY_STORE,
-            payload={"receipt_text": store_text, "order_id": order.id, "order_number": order.order_number},
-            target_device_id=target_device_id,
-            priority=9,
-        )
 
 
 def enqueue_sale_copy(*, order, copy_type: str, target_device_id: str):
+    if copy_type != PrintJob.COPY_CUSTOMER:
+        return
+
     items = list(order.items.all())
     payments = list(order.payments.all().order_by("paid_at", "id"))
     total = order.total_amount()
-    copy_label = "CUSTOMER" if copy_type == PrintJob.COPY_CUSTOMER else "STORE"
+    copy_label = "CUSTOMER"
     text = sale_receipt_text(
         order=order,
         items=items,
@@ -78,14 +66,6 @@ def enqueue_refund_receipt(*, order, target_device_id: str):
         payments=payments,
         width=LINE_WIDTH_80MM,
     )
-    store_text = refund_receipt_text(
-        order=order,
-        items=items,
-        total=total,
-        copy_label="STORE",
-        payments=payments,
-        width=LINE_WIDTH_80MM,
-    )
 
     with transaction.atomic():
         PrintJob.objects.create(
@@ -94,13 +74,6 @@ def enqueue_refund_receipt(*, order, target_device_id: str):
             payload={"receipt_text": customer_text, "order_id": order.id, "order_number": order.order_number},
             target_device_id=target_device_id,
             priority=10,
-        )
-        PrintJob.objects.create(
-            job_type=PrintJob.JOB_REFUND_RECEIPT,
-            copy_type=PrintJob.COPY_STORE,
-            payload={"receipt_text": store_text, "order_id": order.id, "order_number": order.order_number},
-            target_device_id=target_device_id,
-            priority=9,
         )
 
 

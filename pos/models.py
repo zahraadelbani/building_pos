@@ -116,6 +116,12 @@ class OrderItem(models.Model):
         max_length=255,
         help_text="Include unit in name if needed (e.g. Cement bag, Steel meter)",
     )
+    box = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Optional box/pack label shown on receipts when provided",
+    )
     quantity = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(
         max_digits=10,
