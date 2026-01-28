@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Sum
 from django.http import JsonResponse
@@ -117,11 +118,16 @@ def products_page(request):
     if query:
         products = products.filter(name__icontains=query)
 
+    paginator = Paginator(products, 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
+
     return render(
         request,
         "pos/products.html",
         {
-            "products": products,
+            "products": page_obj,
+            "page_obj": page_obj,
             "query": query,
         },
     )
@@ -132,13 +138,17 @@ def reprint_orders(request):
     orders = Order.objects.exclude(status="unpaid").order_by("-order_number")
     if query:
         orders = orders.filter(order_number__icontains=query)
-    orders = orders[:50]
+
+    paginator = Paginator(orders, 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
 
     return render(
         request,
         "pos/reprint.html",
         {
-            "orders": orders,
+            "orders": page_obj,
+            "page_obj": page_obj,
             "query": query,
         },
     )
@@ -175,6 +185,17 @@ def edit_product(request, product_id):
         return redirect("products")
 
     return render(request, "pos/product_edit.html", {"product": product})
+
+
+def delete_product(request, product_id):
+    if request.method != "POST":
+        return redirect("products")
+
+    product = get_object_or_404(Product, id=product_id)
+    product_name = product.name
+    product.delete()
+    messages.success(request, f"Deleted product: {product_name}")
+    return redirect("products")
 
 
 def create_product(request):
@@ -301,11 +322,16 @@ def unpaid_orders(request):
     if query:
         orders = orders.filter(order_number__icontains=query)
 
+    paginator = Paginator(orders.order_by("-order_number"), 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
+
     return render(
         request,
         "pos/unpaid_orders.html",
         {
-            "orders": orders,
+            "orders": page_obj,
+            "page_obj": page_obj,
             "query": query,
         },
     )

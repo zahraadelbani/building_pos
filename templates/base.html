@@ -7,6 +7,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <style>
+        /* Ensure flash messages are opaque and readable */
+        #flash-messages .flash-message {
+            opacity: 1;
+        }
+        #flash-messages .flash-message[data-alert-level="error"] {
+            background: #7f1d1d;
+            border-color: #b91c1c;
+            color: #fff;
+        }
+        #flash-messages .flash-message[data-alert-level="warning"] {
+            background: #92400e;
+            border-color: #b45309;
+            color: #fff7ed;
+        }
+        #flash-messages .flash-message[data-alert-level="success"] {
+            background: #0f172a;
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+    </style>
 </head>
 <body class="bg-slate-100 text-slate-900 antialiased">
 
