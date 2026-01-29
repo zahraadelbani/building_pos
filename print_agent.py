@@ -1,44 +1,80 @@
 import os
 import sys
 import time
+import pathlib
 from typing import Optional
 
 import requests
 from dotenv import load_dotenv
 
 
+# =========================
+# Force libusb backend (Windows)
+# =========================
+def _get_windows_libusb_backend():
+    if os.name != "nt":
+        return None
+
+    base = pathlib.Path(__file__).resolve().parent
+
+    candidates = [
+        base / ".venv" / "Lib" / "site-packages" / "libusb_package" / "libusb-1.0.dll",
+        base / ".venv" / "Scripts" / "libusb-1.0.dll",
+    ]
+
+    dll = next((p for p in candidates if p.exists()), None)
+    if dll is None:
+        raise RuntimeError("libusb-1.0.dll not found in venv")
+
+    import usb.backend.libusb1 as libusb1
+    backend = libusb1.get_backend(find_library=lambda _: str(dll))
+
+    if backend is None:
+        raise RuntimeError(f"Failed to load libusb backend from {dll}")
+
+    return backend
+
+
+USB_BACKEND = _get_windows_libusb_backend()
+
+
+# =========================
+# Helpers
+# =========================
 def _env(name: str, default: Optional[str] = None) -> str:
     value = os.environ.get(name)
-    if value is None:
-        return default or ""
-    return value.strip()
+    return value.strip() if value else (default or "")
 
 
 def _parse_int(value: str) -> int:
     value = (value or "").strip()
-    if not value:
-        raise ValueError("empty")
     if value.lower().startswith("0x"):
         return int(value, 16)
     return int(value)
 
 
+# =========================
+# Printer
+# =========================
 def _build_printer():
-    backend = _env("PRINTER_BACKEND", "usb").lower()
-    if backend != "usb":
-        raise RuntimeError(f"Unsupported PRINTER_BACKEND={backend}. Only 'usb' is supported.")
+    printer_backend = _env("PRINTER_BACKEND", "usb").lower()
+    if printer_backend != "usb":
+        raise RuntimeError("Only USB printers are supported")
 
-    from escpos.printer import Usb  # pylint: disable=import-outside-toplevel
+    from escpos.printer import Usb
 
     vendor_id = _parse_int(_env("PRINTER_USB_VENDOR_ID"))
     product_id = _parse_int(_env("PRINTER_USB_PRODUCT_ID"))
 
-    interface = _env("PRINTER_USB_INTERFACE", "")
-    out_ep = _env("PRINTER_USB_OUT_EP", "")
-    in_ep = _env("PRINTER_USB_IN_EP", "")
-    profile = _env("PRINTER_PROFILE", "")
+    kwargs = {
+        "backend": USB_BACKEND,  # ✅ THIS WAS MISSING
+    }
 
-    kwargs = {}
+    interface = _env("PRINTER_USB_INTERFACE")
+    out_ep = _env("PRINTER_USB_OUT_EP")
+    in_ep = _env("PRINTER_USB_IN_EP")
+    profile = _env("PRINTER_PROFILE")
+
     if interface:
         kwargs["interface"] = _parse_int(interface)
     if out_ep:
@@ -52,29 +88,31 @@ def _build_printer():
 
 
 def _print_logo(printer):
-    logo_path = _env("RECEIPT_LOGO_PATH", "")
+    logo_path = _env("RECEIPT_LOGO_PATH")
     if not logo_path:
         return
+
     if not os.path.exists(logo_path):
         raise FileNotFoundError(f"Logo not found: {logo_path}")
 
-    impl = _env("RECEIPT_LOGO_IMPL", "bitImageColumn") or "bitImageColumn"
-    width = _env("RECEIPT_LOGO_WIDTH", "")
+    impl = _env("RECEIPT_LOGO_IMPL", "bitImageColumn")
+    width = _env("RECEIPT_LOGO_WIDTH")
 
     if width:
-        from PIL import Image  # pylint: disable=import-outside-toplevel
-
+        from PIL import Image
         target_w = _parse_int(width)
         img = Image.open(logo_path).convert("L")
         w, h = img.size
-        if w != target_w and w > 0:
-            new_h = max(1, int(h * (target_w / float(w))))
-            img = img.resize((target_w, new_h))
+        new_h = int(h * (target_w / w))
+        img = img.resize((target_w, new_h))
         printer.image(img, impl=impl)
     else:
         printer.image(logo_path, impl=impl)
 
 
+# =========================
+# Main loop
+# =========================
 def main():
     load_dotenv()
 
@@ -83,25 +121,23 @@ def main():
     token = _env("PRINT_AGENT_TOKEN")
 
     if not base_url or not device_id or not token:
-        print("Missing required env vars: SERVER_BASE_URL, DEVICE_ID, PRINT_AGENT_TOKEN", file=sys.stderr)
+        print("Missing env vars", file=sys.stderr)
         return 2
 
     poll_url = base_url.rstrip("/") + "/api/printing/jobs/poll/"
-    delay_seconds = float(_env("PRINTER_PRINT_DELAY_SECONDS", "0.7") or "0.7")
+    delay_seconds = float(_env("PRINTER_PRINT_DELAY_SECONDS", "0.7"))
 
     session = requests.Session()
-    session.headers.update(
-        {
-            "X-Device-Id": device_id,
-            "X-Print-Agent-Token": token,
-        }
-    )
+    session.headers.update({
+        "X-Device-Id": device_id,
+        "X-Print-Agent-Token": token,
+    })
 
     while True:
         try:
             resp = session.get(poll_url, params={"limit": 5}, timeout=10)
             resp.raise_for_status()
-            jobs = resp.json().get("jobs") or []
+            jobs = resp.json().get("jobs", [])
         except Exception as e:
             print(f"[poll] error: {e}", file=sys.stderr)
             time.sleep(2)
@@ -112,12 +148,8 @@ def main():
             continue
 
         for job in jobs:
-            job_id = job.get("id")
-            payload = job.get("payload") or {}
-            receipt_text = payload.get("receipt_text") or ""
-
-            ack_printed_url = base_url.rstrip("/") + f"/api/printing/jobs/{job_id}/ack-printed/"
-            ack_failed_url = base_url.rstrip("/") + f"/api/printing/jobs/{job_id}/ack-failed/"
+            job_id = job["id"]
+            receipt_text = job.get("payload", {}).get("receipt_text", "")
 
             try:
                 printer = _build_printer()
@@ -126,17 +158,22 @@ def main():
                 printer.cut()
                 printer.close()
 
-                session.post(ack_printed_url, timeout=10).raise_for_status()
+                session.post(
+                    f"{base_url}/api/printing/jobs/{job_id}/ack-printed/",
+                    timeout=10,
+                ).raise_for_status()
+
                 time.sleep(delay_seconds)
+
             except Exception as e:
-                try:
-                    session.post(ack_failed_url, json={"error": str(e)}, timeout=10).raise_for_status()
-                except Exception as e2:
-                    print(f"[ack-failed] error: {e2}", file=sys.stderr)
+                session.post(
+                    f"{base_url}/api/printing/jobs/{job_id}/ack-failed/",
+                    json={"error": str(e)},
+                    timeout=10,
+                )
                 print(f"[print] job {job_id} failed: {e}", file=sys.stderr)
                 time.sleep(2)
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
