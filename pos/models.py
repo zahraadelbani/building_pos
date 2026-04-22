@@ -4,6 +4,7 @@ from django.utils import timezone
 
 
 class Product(models.Model):
+    code = models.PositiveIntegerField(unique=True, null=True, blank=True)
     name = models.CharField(max_length=255, unique=True)
     cost_price = models.DecimalField(
         max_digits=10,
@@ -11,10 +12,22 @@ class Product(models.Model):
         help_text="Internal cost per unit (not shown on customer receipt)",
         default=0,
     )
+    selling_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Default selling price per unit (POS can override per bill)",
+        default=0,
+    )
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        if self.code is None:
+            last_code = Product.objects.aggregate(max_code=models.Max("code"))["max_code"] or 0
+            self.code = last_code + 1
+        super().save(*args, **kwargs)
 
 
 class PrintJob(models.Model):
@@ -33,11 +46,15 @@ class PrintJob(models.Model):
     JOB_SALE_RECEIPT = "SALE_RECEIPT"
     JOB_REFUND_RECEIPT = "REFUND_RECEIPT"
     JOB_PROFIT_REPORT = "PROFIT_REPORT"
+    JOB_DAY_SUMMARY = "DAY_SUMMARY"
+    JOB_MONTH_SUMMARY = "MONTH_SUMMARY"
 
     JOB_TYPE_CHOICES = [
         (JOB_SALE_RECEIPT, "Sale receipt"),
         (JOB_REFUND_RECEIPT, "Refund receipt"),
         (JOB_PROFIT_REPORT, "Profit report"),
+        (JOB_DAY_SUMMARY, "Day summary"),
+        (JOB_MONTH_SUMMARY, "Month summary"),
     ]
 
     COPY_CUSTOMER = "CUSTOMER"

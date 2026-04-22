@@ -10,11 +10,14 @@ urlpatterns = [
     path('order/<int:order_id>/remove-item/<int:item_id>/', views.remove_order_item, name='remove_order_item'),
     path('device/', views.device_setup, name='device_setup'),
     path('reprint/', views.reprint_orders, name='reprint_orders'),
+    path('day/', views.day_view, name='day_view'),
+    path('month/', views.month_view, name='month_view'),
 
     path('products/', views.products_page, name='products'),
     path('products/create/', views.create_product, name='create_product'),
     path('products/<int:product_id>/edit/', views.edit_product, name='edit_product'),
     path('products/<int:product_id>/delete/', views.delete_product, name='delete_product'),
+    path('products/<int:product_id>/barcode/', views.product_barcode, name='product_barcode'),
     path('order/<int:order_id>/add-product/<int:product_id>/', views.add_product_to_order, name='add_product_to_order'),
 
     path('unpaid-orders/', views.unpaid_orders, name='unpaid_orders'),
@@ -24,6 +27,10 @@ urlpatterns = [
     path('print/<int:order_id>/<str:copy_type>/', views.print_receipt, name='print_receipt'),
     path('print-profit/<int:order_id>/', views.print_profit_receipt, name='print_profit_receipt'),
     path('refund/<int:order_id>/', views.refund_order, name='refund_order'),
+    path('day/print-summary/', views.print_day_summary, name='print_day_summary'),
+    path('day/print-receipts/', views.print_day_receipts, name='print_day_receipts'),
+    path('month/print-summary/', views.print_month_summary, name='print_month_summary'),
+    path('month/print-receipts/', views.print_month_receipts, name='print_month_receipts'),
 
     path('api/printing/jobs/poll/', printing_api.poll_jobs, name='printing_poll_jobs'),
     path('api/printing/jobs/<int:job_id>/ack-printed/', printing_api.ack_printed, name='printing_ack_printed'),

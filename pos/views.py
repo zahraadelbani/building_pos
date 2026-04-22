@@ -1,20 +1,34 @@
+from datetime import datetime
+from calendar import month_name
 from decimal import Decimal
 
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Sum
+from django.db.models import Max, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from .models import Order, OrderItem, Payment, PrintJob, Product
-from .printing import enqueue_profit_report, enqueue_refund_receipt, enqueue_sale_copy, enqueue_sale_receipt
+from .printing import (
+    enqueue_day_summary,
+    enqueue_month_summary,
+    enqueue_profit_report,
+    enqueue_refund_receipt,
+    enqueue_sale_copy,
+    enqueue_sale_receipt,
+)
 
 
 DEVICE_ID_SESSION_KEY = "pos_device_id"
 DEVICE_ID_COOKIE_NAME = "pos_device_id"
 DEVICE_ID_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+
+
+def _next_product_code():
+    return (Product.objects.aggregate(max_code=Max("code"))["max_code"] or 0) + 1
 
 
 def get_device_id(request):
@@ -82,7 +96,12 @@ def pos_home(request, order_id=None):
     query = (request.GET.get("q") or "").strip()
     products = []
     if query:
-        products = list(Product.objects.filter(name__icontains=query).order_by("name")[:30])
+        qs = Product.objects.all()
+        if query.isdigit():
+            qs = qs.filter(Q(name__icontains=query) | Q(code=int(query)))
+        else:
+            qs = qs.filter(name__icontains=query)
+        products = list(qs.order_by("name")[:30])
 
     if request.GET.get("partial") == "1":
         return render(
@@ -116,7 +135,10 @@ def products_page(request):
 
     products = Product.objects.all().order_by("name")
     if query:
-        products = products.filter(name__icontains=query)
+        if query.isdigit():
+            products = products.filter(Q(name__icontains=query) | Q(code=int(query)))
+        else:
+            products = products.filter(name__icontains=query)
 
     paginator = Paginator(products, 25)
     page_number = request.GET.get("page") or 1
@@ -129,8 +151,17 @@ def products_page(request):
             "products": page_obj,
             "page_obj": page_obj,
             "query": query,
+            "next_product_code": _next_product_code(),
         },
     )
+
+
+def product_barcode(request, product_id):
+    product = get_object_or_404(Product, id=product_id)
+    # Ensure product has a code assigned
+    if product.code is None:
+        product.save()
+    return render(request, "pos/product_barcode.html", {"product": product})
 
 
 def reprint_orders(request):
@@ -158,8 +189,20 @@ def edit_product(request, product_id):
     product = get_object_or_404(Product, id=product_id)
 
     if request.method == "POST":
+        code_raw = (request.POST.get("code") or "").strip()
         name = (request.POST.get("name") or "").strip()
         cost_price = (request.POST.get("cost_price") or "").strip()
+        selling_price = (request.POST.get("selling_price") or "").strip()
+
+        code = None
+        if code_raw != "":
+            try:
+                code = int(code_raw)
+                if code < 0:
+                    raise ValueError()
+            except Exception:
+                messages.error(request, "Product code must be a valid number (0 or more).")
+                return redirect("edit_product", product_id=product.id)
 
         if not name:
             messages.error(request, "Name is required.")
@@ -173,18 +216,35 @@ def edit_product(request, product_id):
             messages.error(request, "Cost price must be a valid number (0 or more).")
             return redirect("edit_product", product_id=product.id)
 
+        try:
+            selling_price = Decimal(selling_price) if selling_price != "" else Decimal("0")
+            if selling_price <= 0:
+                raise ValueError()
+        except Exception:
+            messages.error(request, "Selling price must be a valid number (greater than 0).")
+            return redirect("edit_product", product_id=product.id)
+
+        product.code = code
         product.name = name
         product.cost_price = cost_price
+        product.selling_price = selling_price
         try:
             product.save()
         except IntegrityError:
-            messages.error(request, "A product with this name already exists.")
+            messages.error(request, "That product name or code is already in use.")
             return redirect("edit_product", product_id=product.id)
 
         messages.success(request, f"Updated product: {product.name}")
         return redirect("products")
 
-    return render(request, "pos/product_edit.html", {"product": product})
+    return render(
+        request,
+        "pos/product_edit.html",
+        {
+            "product": product,
+            "next_product_code": _next_product_code(),
+        },
+    )
 
 
 def delete_product(request, product_id):
@@ -202,8 +262,10 @@ def create_product(request):
     if request.method != "POST":
         return redirect("products")
 
+    code_raw = request.POST.get("code", "").strip()
     name = request.POST.get("name", "").strip()
     cost_price = request.POST.get("cost_price", "").strip()
+    selling_price = request.POST.get("selling_price", "").strip()
 
     next_url = request.POST.get("next")
     if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
@@ -211,9 +273,19 @@ def create_product(request):
         if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             next_url = "/products/"
 
-    if not name or not cost_price:
-        messages.error(request, "Name and cost price are required.")
+    if not name or not cost_price or selling_price == "":
+        messages.error(request, "Name, cost price, and selling price are required.")
         return redirect(next_url)
+
+    code = None
+    if code_raw != "":
+        try:
+            code = int(code_raw)
+            if code < 0:
+                raise ValueError()
+        except Exception:
+            messages.error(request, "Product code must be a valid number (0 or more).")
+            return redirect(next_url)
 
     try:
         cost_price = Decimal(cost_price)
@@ -224,9 +296,17 @@ def create_product(request):
         return redirect(next_url)
 
     try:
-        Product.objects.create(name=name, cost_price=cost_price)
+        selling_price = Decimal(selling_price)
+        if selling_price <= 0:
+            raise ValueError()
+    except Exception:
+        messages.error(request, "Selling price must be a valid number (greater than 0).")
+        return redirect(next_url)
+
+    try:
+        Product.objects.create(code=code, name=name, cost_price=cost_price, selling_price=selling_price)
     except IntegrityError:
-        messages.error(request, "A product with this name already exists.")
+        messages.error(request, "That product name or code is already in use.")
         return redirect(next_url)
 
     messages.success(request, f"Added product: {name}")
@@ -241,7 +321,7 @@ def add_product_to_order(request, order_id, product_id):
     product = get_object_or_404(Product, id=product_id)
 
     quantity = request.POST.get("quantity", "").strip()
-    selling_price = request.POST.get("selling_price", "").strip()
+    selling_price_raw = request.POST.get("selling_price", "").strip()
     box = (request.POST.get("box") or "").strip()
     if len(box) > 50:
         box = box[:50]
@@ -250,10 +330,16 @@ def add_product_to_order(request, order_id, product_id):
     except Exception:
         quantity = Decimal("0")
 
-    try:
-        selling_price = Decimal(selling_price)
-    except Exception:
-        selling_price = Decimal("0")
+    # Use product's default selling price when POS didn't send/enter one.
+    selling_price = None
+    if selling_price_raw != "":
+        try:
+            selling_price = Decimal(selling_price_raw)
+        except Exception:
+            selling_price = None
+
+    if selling_price is None:
+        selling_price = product.selling_price
 
     if quantity <= 0 or selling_price <= 0:
         messages.error(request, "Quantity and selling price are required (must be greater than 0).")
@@ -571,3 +657,191 @@ def refund_order(request, order_id):
             "total": order.total_amount(),
         },
     )
+
+
+def day_view(request):
+    raw_date = (request.GET.get("date") or "").strip()
+    if raw_date:
+        try:
+            selected = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except Exception:
+            selected = timezone.localdate()
+    else:
+        selected = timezone.localdate()
+
+    orders = (
+        Order.objects.filter(status="paid", payments__paid_at__date=selected)
+        .distinct()
+        .order_by("order_number")
+        .prefetch_related("items")
+    )
+
+    total_sales = sum((o.total_amount() for o in orders), Decimal("0"))
+    total_profit = sum((o.total_profit() for o in orders), Decimal("0"))
+
+    return render(
+        request,
+        "pos/day.html",
+        {
+            "selected_date": selected,
+            "orders": orders,
+            "total_sales": total_sales,
+            "total_profit": total_profit,
+        },
+    )
+
+
+def month_view(request):
+    raw_month = (request.GET.get("month") or "").strip()
+    today = timezone.localdate()
+    if raw_month:
+        try:
+            selected_dt = datetime.strptime(raw_month, "%Y-%m")
+            selected_year = selected_dt.year
+            selected_month = selected_dt.month
+        except Exception:
+            selected_year = today.year
+            selected_month = today.month
+    else:
+        selected_year = today.year
+        selected_month = today.month
+
+    orders = (
+        Order.objects.filter(
+            status="paid",
+            payments__paid_at__year=selected_year,
+            payments__paid_at__month=selected_month,
+        )
+        .distinct()
+        .order_by("order_number")
+        .prefetch_related("items")
+    )
+
+    total_sales = sum((o.total_amount() for o in orders), Decimal("0"))
+    total_profit = sum((o.total_profit() for o in orders), Decimal("0"))
+
+    return render(
+        request,
+        "pos/month.html",
+        {
+            "selected_month_value": f"{selected_year:04d}-{selected_month:02d}",
+            "selected_month_label": f"{month_name[selected_month]} {selected_year}",
+            "selected_year": selected_year,
+            "selected_month": selected_month,
+            "orders": orders,
+            "total_sales": total_sales,
+            "total_profit": total_profit,
+        },
+    )
+
+
+def print_day_summary(request):
+    if request.method != "POST":
+        return redirect("day_view")
+
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
+
+    raw_date = (request.POST.get("date") or "").strip()
+    try:
+        selected = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except Exception:
+        selected = timezone.localdate()
+
+    enqueue_day_summary(date=selected, target_device_id=device_id)
+    messages.success(request, f"Printing: Day summary for {selected} sent to this device.")
+    return redirect(f"{request.META.get('HTTP_REFERER') or '/day/'}")
+
+
+def print_day_receipts(request):
+    if request.method != "POST":
+        return redirect("day_view")
+
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
+
+    raw_date = (request.POST.get("date") or "").strip()
+    try:
+        selected = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except Exception:
+        selected = timezone.localdate()
+
+    orders = (
+        Order.objects.filter(status="paid", payments__paid_at__date=selected)
+        .distinct()
+        .order_by("order_number")
+    )
+    count = 0
+    for order in orders:
+        enqueue_sale_receipt(order=order, target_device_id=device_id)
+        count += 1
+
+    messages.success(request, f"Printing: {count} receipts for {selected} sent to this device.")
+    return redirect(f"{request.META.get('HTTP_REFERER') or '/day/'}")
+
+
+def print_month_summary(request):
+    if request.method != "POST":
+        return redirect("month_view")
+
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
+
+    raw_month = (request.POST.get("month") or "").strip()
+    today = timezone.localdate()
+    try:
+        selected_dt = datetime.strptime(raw_month, "%Y-%m")
+        selected_year = selected_dt.year
+        selected_month = selected_dt.month
+    except Exception:
+        selected_year = today.year
+        selected_month = today.month
+
+    enqueue_month_summary(year=selected_year, month=selected_month, target_device_id=device_id)
+    messages.success(
+        request,
+        f"Printing: Month summary for {selected_year:04d}-{selected_month:02d} sent to this device.",
+    )
+    return redirect(f"{request.META.get('HTTP_REFERER') or '/month/'}")
+
+
+def print_month_receipts(request):
+    if request.method != "POST":
+        return redirect("month_view")
+
+    device_id = _require_device_id(request)
+    if not device_id:
+        return redirect("device_setup")
+
+    raw_month = (request.POST.get("month") or "").strip()
+    today = timezone.localdate()
+    try:
+        selected_dt = datetime.strptime(raw_month, "%Y-%m")
+        selected_year = selected_dt.year
+        selected_month = selected_dt.month
+    except Exception:
+        selected_year = today.year
+        selected_month = today.month
+
+    orders = (
+        Order.objects.filter(
+            status="paid",
+            payments__paid_at__year=selected_year,
+            payments__paid_at__month=selected_month,
+        )
+        .distinct()
+        .order_by("order_number")
+    )
+    count = 0
+    for order in orders:
+        enqueue_sale_receipt(order=order, target_device_id=device_id)
+        count += 1
+
+    messages.success(
+        request,
+        f"Printing: {count} receipts for {selected_year:04d}-{selected_month:02d} sent to this device.",
+    )
+    return redirect(f"{request.META.get('HTTP_REFERER') or '/month/'}")

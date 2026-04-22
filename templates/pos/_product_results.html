@@ -1,3 +1,4 @@
+{% load pos_filters %}
 {% if not query %}
 {% else %}
     <div class="bg-slate-50 px-4 py-3 flex items-center justify-between">
@@ -10,11 +11,17 @@
         {% for p in products %}
             <div class="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                    <div class="text-base font-semibold text-slate-900 truncate">{{ p.name }}</div>
+                    <div class="text-base font-semibold text-slate-900 truncate">
+                        {{ p.name }}
+                        {% if p.code %}
+                            <span class="ml-2 text-xs font-semibold text-slate-500">#{{ p.code }}</span>
+                        {% endif %}
+                    </div>
                 </div>
                 <button type="button"
                         data-select-product="1"
                         data-product-name="{{ p.name }}"
+                        data-selling-price="{{ p.selling_price|whole }}"
                         data-action-url="{% url 'add_product_to_order' order.id p.id %}"
                         class="shrink-0 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50">
                     Select

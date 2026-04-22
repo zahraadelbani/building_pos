@@ -118,7 +118,9 @@ def sale_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("BUILDING MATERIALS SHOP", width))
+    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("Jimpex - Kanifing", width))
+    lines.append(_center("Tel: 2866668", width))
     lines.append(_center(f"{copy_label} COPY", width))
     lines.append(_hr(width))
     created = timezone.localtime(order.created_at) if order.created_at else timezone.now()
@@ -177,7 +179,9 @@ def refund_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("BUILDING MATERIALS SHOP", width))
+    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("Jimpex - Kanifing", width))
+    lines.append(_center("Tel: 2866668", width))
     lines.append(_center("REFUND RECEIPT", width))
     lines.append(_center(f"{copy_label} COPY", width))
     lines.append(_hr(width))
@@ -229,7 +233,9 @@ def profit_report_text(*, order, items, total, total_profit, width: int = LINE_W
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("BUILDING MATERIALS SHOP", width))
+    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("Jimpex - Kanifing", width))
+    lines.append(_center("Tel: 2866668", width))
     lines.append(_center("PROFIT REPORT (INTERNAL)", width))
     lines.append(_hr(width))
     lines.append(_line_lr("Order #", str(order.order_number), width))
@@ -270,5 +276,67 @@ def profit_report_text(*, order, items, total, total_profit, width: int = LINE_W
     lines.append(_hr(width))
     lines.append(_line_lr("TOTAL", _money(total), width))
     lines.append(_line_lr("PROFIT", _money(total_profit), width))
+    lines.append("\n\n")
+    return "\n".join(lines)
+
+
+def day_summary_text(*, date, orders, width: int = LINE_WIDTH_80MM) -> str:
+    orders = list(orders)
+    lines = []
+    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("Jimpex - Kanifing", width))
+    lines.append(_center("Tel: 2866668", width))
+    lines.append(_center("DAY SUMMARY (INTERNAL)", width))
+    lines.append(_hr(width))
+    lines.append(_line_lr("Date", date.strftime("%Y-%m-%d"), width))
+    lines.append(_hr(width))
+
+    total_sales = Decimal("0")
+    total_profit = Decimal("0")
+    count = 0
+
+    for order in orders:
+        count += 1
+        sales = Decimal(str(order.total_amount()))
+        profit = Decimal(str(order.total_profit()))
+        total_sales += sales
+        total_profit += profit
+        lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
+
+    lines.append(_hr(width))
+    lines.append(_line_lr("Orders", str(count), width))
+    lines.append(_line_lr("Total Sales", _money(total_sales), width))
+    lines.append(_line_lr("Total Profit", _money(total_profit), width))
+    lines.append("\n\n")
+    return "\n".join(lines)
+
+
+def month_summary_text(*, year: int, month: int, orders, width: int = LINE_WIDTH_80MM) -> str:
+    orders = list(orders)
+    lines = []
+    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("Jimpex - Kanifing", width))
+    lines.append(_center("Tel: 2866668", width))
+    lines.append(_center("MONTH SUMMARY (INTERNAL)", width))
+    lines.append(_hr(width))
+    lines.append(_line_lr("Month", f"{year:04d}-{month:02d}", width))
+    lines.append(_hr(width))
+
+    total_sales = Decimal("0")
+    total_profit = Decimal("0")
+    count = 0
+
+    for order in orders:
+        count += 1
+        sales = Decimal(str(order.total_amount()))
+        profit = Decimal(str(order.total_profit()))
+        total_sales += sales
+        total_profit += profit
+        lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
+
+    lines.append(_hr(width))
+    lines.append(_line_lr("Orders", str(count), width))
+    lines.append(_line_lr("Total Sales", _money(total_sales), width))
+    lines.append(_line_lr("Total Profit", _money(total_profit), width))
     lines.append("\n\n")
     return "\n".join(lines)

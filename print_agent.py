@@ -119,6 +119,8 @@ def main():
     base_url = _env("SERVER_BASE_URL")
     device_id = _env("DEVICE_ID")
     token = _env("PRINT_AGENT_TOKEN")
+    dry_run_raw = _env("PRINT_DRY_RUN", "")
+    dry_run = dry_run_raw.lower() in {"1", "true", "yes", "y", "on"}
 
     if not base_url or not device_id or not token:
         print("Missing env vars", file=sys.stderr)
@@ -149,14 +151,19 @@ def main():
 
         for job in jobs:
             job_id = job["id"]
+            job_type = job.get("job_type") or ""
             receipt_text = job.get("payload", {}).get("receipt_text", "")
 
             try:
-                printer = _build_printer()
-                _print_logo(printer)
-                printer.text(receipt_text)
-                printer.cut()
-                printer.close()
+                if dry_run:
+                    print(f"\n[DRY_RUN] Would print job={job_id} type={job_type}\n")
+                    print(receipt_text)
+                else:
+                    printer = _build_printer()
+                    _print_logo(printer)
+                    printer.text(receipt_text)
+                    printer.cut()
+                    printer.close()
 
                 session.post(
                     f"{base_url}/api/printing/jobs/{job_id}/ack-printed/",

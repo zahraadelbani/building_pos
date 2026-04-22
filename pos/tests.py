@@ -1,3 +1,74 @@
-from django.test import TestCase
+from datetime import datetime
+from decimal import Decimal
 
-# Create your tests here.
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from .models import Order, OrderItem, Payment, PrintJob
+from .receipt import month_summary_text
+
+
+class MonthSummaryTests(TestCase):
+    def _create_paid_order(self, *, order_number: int, paid_at, quantity="2", cost="30", selling="50"):
+        order = Order.objects.create(order_number=order_number, status="paid", is_active=False, created_at=paid_at)
+        OrderItem.objects.create(
+            order=order,
+            item_name=f"Item {order_number}",
+            quantity=Decimal(quantity),
+            selling_price=Decimal(selling),
+            cost_price_snapshot=Decimal(cost),
+        )
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal(quantity) * Decimal(selling),
+            change_given=Decimal("0"),
+            paid_at=paid_at,
+        )
+        return order
+
+    def test_month_view_shows_only_selected_month_totals(self):
+        april_paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
+        may_paid_at = timezone.make_aware(datetime(2026, 5, 2, 9, 30))
+
+        self._create_paid_order(order_number=101, paid_at=april_paid_at)
+        self._create_paid_order(order_number=102, paid_at=may_paid_at, quantity="1", cost="20", selling="35")
+
+        response = self.client.get(reverse("month_view"), {"month": "2026-04"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "April 2026")
+        self.assertContains(response, "#101")
+        self.assertNotContains(response, "#102")
+        self.assertEqual(response.context["total_sales"], Decimal("100"))
+        self.assertEqual(response.context["total_profit"], Decimal("40"))
+
+    def test_print_month_summary_creates_month_summary_job(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 11, 10, 15))
+        self._create_paid_order(order_number=103, paid_at=paid_at, quantity="3", cost="10", selling="25")
+
+        session = self.client.session
+        session["pos_device_id"] = "cashier-1"
+        session.save()
+
+        response = self.client.post(reverse("print_month_summary"), {"month": "2026-04"})
+
+        self.assertEqual(response.status_code, 302)
+        job = PrintJob.objects.get(job_type=PrintJob.JOB_MONTH_SUMMARY)
+        self.assertEqual(job.target_device_id, "cashier-1")
+        self.assertEqual(job.payload["month"], "2026-04")
+        self.assertIn("MONTH SUMMARY (INTERNAL)", job.payload["receipt_text"])
+
+    def test_month_summary_text_includes_profit_totals(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 12, 14, 45))
+        order = self._create_paid_order(order_number=104, paid_at=paid_at, quantity="4", cost="5", selling="12")
+
+        text = month_summary_text(year=2026, month=4, orders=[order])
+
+        self.assertIn("Month", text)
+        self.assertIn("2026-04", text)
+        self.assertIn("Total Sales", text)
+        self.assertIn("48", text)
+        self.assertIn("Total Profit", text)
+        self.assertIn("28", text)
