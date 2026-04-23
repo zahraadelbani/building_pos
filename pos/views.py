@@ -98,7 +98,7 @@ def pos_home(request, order_id=None):
     if query:
         qs = Product.objects.all()
         if query.isdigit():
-            qs = qs.filter(Q(name__icontains=query) | Q(code=int(query)))
+            qs = qs.filter(code=int(query))
         else:
             qs = qs.filter(name__icontains=query)
         products = list(qs.order_by("name")[:30])
@@ -136,7 +136,7 @@ def products_page(request):
     products = Product.objects.all().order_by("name")
     if query:
         if query.isdigit():
-            products = products.filter(Q(name__icontains=query) | Q(code=int(query)))
+            products = products.filter(code=int(query))
         else:
             products = products.filter(name__icontains=query)
 
@@ -581,6 +581,36 @@ def pay_order(request, order_id):
     )
 
 
+def mark_order_paid(request, order_id):
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    total = order.total_amount()
+    if total <= 0:
+        messages.error(request, "Add at least one item before marking the order as paid.")
+        return redirect("pos_order", order_id=order_id)
+
+    with transaction.atomic():
+        order = Order.objects.select_for_update().get(id=order.id)
+        if order.status != "unpaid":
+            return redirect("pos_home")
+
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=total,
+            change_given=Decimal("0.00"),
+        )
+        order.status = "paid"
+        order.is_active = False
+        order.save()
+
+    messages.success(request, f"Order #{order.order_number} marked as paid.")
+    return redirect("pos_home")
+
+
 def print_receipt(request, order_id, copy_type):
     order = get_object_or_404(Order, id=order_id)
 
@@ -669,22 +699,27 @@ def day_view(request):
     else:
         selected = timezone.localdate()
 
-    orders = (
+    orders_qs = (
         Order.objects.filter(status="paid", payments__paid_at__date=selected)
         .distinct()
         .order_by("order_number")
         .prefetch_related("items")
     )
 
-    total_sales = sum((o.total_amount() for o in orders), Decimal("0"))
-    total_profit = sum((o.total_profit() for o in orders), Decimal("0"))
+    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
+    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    paginator = Paginator(orders_qs, 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
 
     return render(
         request,
         "pos/day.html",
         {
             "selected_date": selected,
-            "orders": orders,
+            "orders": page_obj,
+            "page_obj": page_obj,
+            "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
         },
@@ -706,7 +741,7 @@ def month_view(request):
         selected_year = today.year
         selected_month = today.month
 
-    orders = (
+    orders_qs = (
         Order.objects.filter(
             status="paid",
             payments__paid_at__year=selected_year,
@@ -717,8 +752,11 @@ def month_view(request):
         .prefetch_related("items")
     )
 
-    total_sales = sum((o.total_amount() for o in orders), Decimal("0"))
-    total_profit = sum((o.total_profit() for o in orders), Decimal("0"))
+    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
+    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    paginator = Paginator(orders_qs, 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
 
     return render(
         request,
@@ -728,7 +766,9 @@ def month_view(request):
             "selected_month_label": f"{month_name[selected_month]} {selected_year}",
             "selected_year": selected_year,
             "selected_month": selected_month,
-            "orders": orders,
+            "orders": page_obj,
+            "page_obj": page_obj,
+            "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
         },

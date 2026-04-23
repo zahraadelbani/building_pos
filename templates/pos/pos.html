@@ -262,7 +262,7 @@
                             <button type="button"
                                id="pay-btn"
                                class="block w-full text-center rounded-2xl bg-teal-700 text-white px-6 py-3 text-lg font-extrabold hover:bg-teal-800">
-                                Pay
+                                Print
                             </button>
 
                             <a href="{% url 'pay_later' order.id %}"
@@ -315,19 +315,19 @@
     </div>
 </div>
 
-<!-- ================= PAYMENT MODAL ================= -->
-<div id="payment-modal"
+<!-- ================= PRINT MODAL ================= -->
+<div id="print-modal"
      class="fixed inset-0 hidden items-center justify-center z-50 p-4"
      style="background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
     <div class="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
             <div>
-                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Payment</div>
+                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Print Receipt</div>
                 <div class="text-lg font-extrabold text-slate-900">Order #{{ order.order_number }}</div>
             </div>
             <div class="flex items-center gap-3">
-                <span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Multi-tender</span>
-                <button type="button" id="payment-close" class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                <span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Receipt Copies</span>
+                <button type="button" id="print-close" class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
                     Close
                 </button>
             </div>
@@ -335,69 +335,43 @@
 
         <div class="p-6">
             <p class="mb-2 text-slate-500 text-sm">
-                Total due
-                <strong id="payment-total" class="text-slate-800 text-xl ml-2">{{ total|whole }}</strong>
+                Order total
+                <strong class="text-slate-800 text-xl ml-2">{{ total|whole }}</strong>
             </p>
-            <div id="payment-status" data-total="{{ total|whole }}" class="mb-4 text-sm font-semibold text-slate-700">
-                Remaining: {{ total|whole }}
+            <div class="mb-4 text-sm font-semibold text-slate-700">
+                Choose the copy to send to this device.
             </div>
 
-            <div id="payment-error" class="hidden mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800"></div>
-            <div id="payment-success" class="hidden mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800"></div>
-
-            <form id="payment-form" method="post" action="{% url 'pay_order' order.id %}">
-                {% csrf_token %}
-
-                <div id="payment-inputs" class="space-y-3">
-                    <div onclick="togglePay('cash')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
-                        <div class="flex items-center justify-between">
-                            <strong>Cash (Amount Given)</strong>
-                            <span class="text-xs text-slate-500">Tap to enter</span>
-                        </div>
-                        <input type="number" step="1" min="0" name="cash" id="cash-input"
-                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
-                    </div>
-
-                    <div onclick="togglePay('bank')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
-                        <div class="flex items-center justify-between">
-                            <strong>Bank Transfer</strong>
-                            <span class="text-xs text-slate-500">Enter amount + bank</span>
-                        </div>
-                        <input type="number" step="1" min="0" name="bank" id="bank-input"
-                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
-                        <input type="text" name="bank_name" id="bank-name"
-                               placeholder="Bank name"
-                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
-                    </div>
-
-                    <div onclick="togglePay('wave')" class="border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-slate-50">
-                        <div class="flex items-center justify-between">
-                            <strong>Wave</strong>
-                            <span class="text-xs text-slate-500">Optional</span>
-                        </div>
-                        <input type="number" step="1" min="0" name="wave" id="wave-input"
-                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
-                    </div>
-
-                    <div onclick="togglePay('aps')" class="border border-slate-200 rounded-xl p-3 mb-4 cursor-pointer hover:bg-slate-50">
-                        <div class="flex items-center justify-between">
-                            <strong>APS</strong>
-                            <span class="text-xs text-slate-500">Optional</span>
-                        </div>
-                        <input type="number" step="1" min="0" name="aps" id="aps-input"
-                               class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white">
-                    </div>
-                </div>
-
-                <div class="flex gap-2">
-                    <button id="confirm-payment" class="rounded-xl bg-slate-950 text-white px-6 py-3 text-base font-extrabold hover:bg-black w-full disabled:bg-slate-400 disabled:text-slate-100 disabled:cursor-not-allowed" disabled>
-                        Confirm Payment
+            <div class="grid grid-cols-1 gap-3">
+                <form method="post" action="{% url 'mark_order_paid' order.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="w-full rounded-xl border border-emerald-700 bg-emerald-700 text-white px-6 py-4 text-base font-extrabold hover:bg-emerald-800">
+                        Paid
                     </button>
-                    <button type="button" id="payment-cancel" class="rounded-xl border border-slate-200 bg-white text-slate-700 px-6 py-3 text-base font-extrabold hover:bg-slate-50 w-full">
-                        Cancel
+                </form>
+
+                <form method="post" action="{% url 'print_receipt' order.id 'customer' %}">
+                    {% csrf_token %}
+                    <button type="submit" class="w-full rounded-xl border border-slate-950 bg-slate-950 text-white px-6 py-4 text-base font-extrabold hover:bg-black">
+                        Print Customer Copy
                     </button>
-                </div>
-            </form>
+                </form>
+
+                <form method="post" action="{% url 'print_profit_receipt' order.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="w-full rounded-xl border border-slate-200 bg-white text-slate-800 px-6 py-4 text-base font-extrabold hover:bg-slate-50">
+                        Print Profit Copy
+                    </button>
+                </form>
+
+                <button type="button" id="print-cancel" class="w-full rounded-xl border border-slate-200 bg-white text-slate-700 px-6 py-3 text-base font-extrabold hover:bg-slate-50">
+                    Cancel
+                </button>
+            </div>
+
+            <div class="mt-4 text-xs text-slate-500 text-center">
+                Device: {% if device_id %}<span class="font-semibold">{{ device_id }}</span>{% else %}<span class="font-semibold text-red-700">NOT SET</span>{% endif %}
+            </div>
         </div>
     </div>
 </div>
@@ -478,39 +452,14 @@
 <script>
     (function () {
         const payBtn = document.getElementById("pay-btn");
-        const modal = document.getElementById("payment-modal");
-        const closeBtn = document.getElementById("payment-close");
-        const cancelBtn = document.getElementById("payment-cancel");
-        const form = document.getElementById("payment-form");
-        const statusEl = document.getElementById("payment-status");
-        const errorEl = document.getElementById("payment-error");
-        const successEl = document.getElementById("payment-success");
-        const confirmBtn = document.getElementById("confirm-payment");
-
-        const cashInput = document.getElementById("cash-input");
-        const bankInput = document.getElementById("bank-input");
-        const bankNameInput = document.getElementById("bank-name");
-        const waveInput = document.getElementById("wave-input");
-        const apsInput = document.getElementById("aps-input");
-
-        function show(el, text) {
-            if (!el) return;
-            if (text) el.textContent = text;
-            el.classList.remove("hidden");
-        }
-        function hide(el) {
-            if (!el) return;
-            el.classList.add("hidden");
-            el.textContent = "";
-        }
+        const modal = document.getElementById("print-modal");
+        const closeBtn = document.getElementById("print-close");
+        const cancelBtn = document.getElementById("print-cancel");
 
         function openModal() {
             if (!modal) return;
-            hide(errorEl);
-            hide(successEl);
             modal.classList.remove("hidden");
             modal.classList.add("flex");
-            updatePaymentStatus();
         }
 
         function closeModal() {
@@ -519,127 +468,12 @@
             modal.classList.remove("flex");
         }
 
-        function num(el) {
-            const v = parseInt((el?.value || "0").toString(), 10);
-            return Number.isFinite(v) && v > 0 ? v : 0;
-        }
-
-        function updatePaymentStatus() {
-            if (!statusEl || !confirmBtn) return;
-            const total = parseInt(statusEl.dataset.total || "0", 10) || 0;
-
-            const wave = num(waveInput);
-            const aps = num(apsInput);
-            const bank = num(bankInput);
-            const cash = num(cashInput);
-
-            const nonCash = wave + aps + bank;
-            let error = "";
-            if (nonCash > total) {
-                error = "Non-cash cannot exceed total.";
-            }
-            if (bank > 0 && !(bankNameInput?.value || "").trim()) {
-                error = "Bank name is required for bank transfer.";
-            }
-
-            if (error) {
-                show(errorEl, error);
-                confirmBtn.disabled = true;
-                return;
-            }
-
-            hide(errorEl);
-
-            const cashNeeded = Math.max(0, total - nonCash);
-            const remaining = Math.max(0, cashNeeded - cash);
-            if (remaining > 0) {
-                statusEl.textContent = `Remaining: ${remaining}`;
-                statusEl.classList.remove("text-emerald-600");
-                statusEl.classList.add("text-red-600");
-                confirmBtn.disabled = true;
-                return;
-            }
-
-            const change = cash > cashNeeded ? (cash - cashNeeded) : 0;
-            if (change > 0) {
-                statusEl.textContent = `Change: ${change}`;
-            } else {
-                statusEl.textContent = "Paid in full";
-            }
-            statusEl.classList.remove("text-red-600");
-            statusEl.classList.add("text-emerald-600");
-            confirmBtn.disabled = false;
-        }
-
         if (payBtn) payBtn.addEventListener("click", openModal);
         if (closeBtn) closeBtn.addEventListener("click", closeModal);
         if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
         if (modal) {
             modal.addEventListener("click", function (e) {
                 if (e.target === modal) closeModal();
-            });
-        }
-
-        window.togglePay = function (method) {
-            const map = {
-                cash: ["cash-input"],
-                bank: ["bank-input", "bank-name"],
-                wave: ["wave-input"],
-                aps: ["aps-input"],
-            };
-            const targets = map[method] || [];
-            targets.forEach((id) => {
-                const el = document.getElementById(id);
-                if (!el) return;
-                el.classList.remove("hidden");
-                el.disabled = false;
-            });
-            if (targets.length) {
-                const first = document.getElementById(targets[0]);
-                if (first) {
-                    setTimeout(() => {
-                        first.focus();
-                        first.select?.();
-                    }, 0);
-                }
-            }
-        };
-
-        [cashInput, bankInput, bankNameInput, waveInput, apsInput].forEach((el) => {
-            if (el) el.addEventListener("input", updatePaymentStatus);
-        });
-        updatePaymentStatus();
-
-        if (form) {
-            form.addEventListener("submit", function (e) {
-                e.preventDefault();
-                hide(errorEl);
-                hide(successEl);
-                confirmBtn.disabled = true;
-
-                fetch(form.action, {
-                    method: "POST",
-                    headers: { "X-Requested-With": "XMLHttpRequest" },
-                    body: new FormData(form),
-                })
-                    .then(async (r) => {
-                        const data = await r.json().catch(() => ({}));
-                        if (!r.ok || !data.ok) {
-                            throw new Error(data.error || "Payment failed.");
-                        }
-                        return data;
-                    })
-                    .then((data) => {
-                        const change = (data.change || "0");
-                        show(successEl, `Payment successful. Change: ${change}`);
-                        window.setTimeout(() => { window.location.href = "{% url 'pos_home' %}"; }, 800);
-                    })
-                    .catch((err) => {
-                        show(errorEl, err.message || "Payment failed.");
-                    })
-                    .finally(() => {
-                        updatePaymentStatus();
-                    });
             });
         }
     })();

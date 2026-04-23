@@ -37,7 +37,7 @@
                 <div class="rounded-2xl border border-slate-200 p-4">
                     <div class="text-xs font-semibold text-slate-500 uppercase">Orders</div>
                     <div class="mt-1 text-2xl font-extrabold text-slate-900">
-                        {{ orders|length }}
+                        {{ total_order_count }}
                     </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 p-4">
@@ -74,7 +74,7 @@
             <div class="rounded-2xl border border-slate-200 overflow-hidden">
                 <div class="bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between">
                     <span>Paid Orders</span>
-                    <span class="text-xs text-slate-500">Only PAID orders are listed</span>
+                    <span class="text-xs text-slate-500">{{ total_order_count }} paid order{{ total_order_count|pluralize }}</span>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -115,6 +115,22 @@
                     </table>
                 </div>
             </div>
+
+            {% if page_obj.paginator.num_pages > 1 %}
+            <div class="flex items-center justify-between text-sm text-slate-600">
+                <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+                <div class="flex items-center gap-2">
+                    {% if page_obj.has_previous %}
+                        <a class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50"
+                           href="?month={{ selected_month_value }}&page={{ page_obj.previous_page_number }}">Prev</a>
+                    {% endif %}
+                    {% if page_obj.has_next %}
+                        <a class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50"
+                           href="?month={{ selected_month_value }}&page={{ page_obj.next_page_number }}">Next</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>

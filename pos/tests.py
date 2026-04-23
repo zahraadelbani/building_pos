@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Order, OrderItem, Payment, PrintJob
+from .models import Order, OrderItem, Payment, PrintJob, Product
 from .receipt import month_summary_text
 
 
@@ -44,6 +44,33 @@ class MonthSummaryTests(TestCase):
         self.assertEqual(response.context["total_sales"], Decimal("100"))
         self.assertEqual(response.context["total_profit"], Decimal("40"))
 
+    def test_day_view_paginates_paid_orders_without_changing_totals(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
+        for order_number in range(200, 226):
+            self._create_paid_order(order_number=order_number, paid_at=paid_at, quantity="1", cost="2", selling="5")
+
+        response = self.client.get(reverse("day_view"), {"date": "2026-04-10"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_order_count"], 26)
+        self.assertEqual(len(response.context["orders"]), 25)
+        self.assertEqual(response.context["total_sales"], Decimal("130"))
+        self.assertContains(response, "Page 1 of 2")
+
+    def test_month_view_paginates_paid_orders_without_changing_totals(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
+        for order_number in range(300, 326):
+            self._create_paid_order(order_number=order_number, paid_at=paid_at, quantity="1", cost="2", selling="5")
+
+        response = self.client.get(reverse("month_view"), {"month": "2026-04", "page": "2"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_order_count"], 26)
+        self.assertEqual(len(response.context["orders"]), 1)
+        self.assertEqual(response.context["total_sales"], Decimal("130"))
+        self.assertContains(response, "#325")
+        self.assertContains(response, "Page 2 of 2")
+
     def test_print_month_summary_creates_month_summary_job(self):
         paid_at = timezone.make_aware(datetime(2026, 4, 11, 10, 15))
         self._create_paid_order(order_number=103, paid_at=paid_at, quantity="3", cost="10", selling="25")
@@ -72,3 +99,20 @@ class MonthSummaryTests(TestCase):
         self.assertIn("48", text)
         self.assertIn("Total Profit", text)
         self.assertIn("28", text)
+
+
+class ProductSearchTests(TestCase):
+    def test_pos_numeric_search_matches_product_code_only(self):
+        order = Order.objects.create(order_number=1, status="unpaid")
+        matching = Product.objects.create(code=1, name="Cement", cost_price=Decimal("10"), selling_price=Decimal("15"))
+        Product.objects.create(code=2, name="1m LED 300N", cost_price=Decimal("20"), selling_price=Decimal("30"))
+
+        response = self.client.get(
+            reverse("pos_order", args=[order.id]),
+            {"q": "1", "partial": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["products"]), [matching])
+        self.assertContains(response, "Cement")
+        self.assertNotContains(response, "1m LED 300N")

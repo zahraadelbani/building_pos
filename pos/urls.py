@@ -24,6 +24,7 @@ urlpatterns = [
     path('resume-order/<int:order_id>/', views.resume_order, name='resume_order'),
     path('pay-later/<int:order_id>/', views.pay_later, name='pay_later'),
     path('pay/<int:order_id>/', views.pay_order, name='pay_order'),
+    path('mark-paid/<int:order_id>/', views.mark_order_paid, name='mark_order_paid'),
     path('print/<int:order_id>/<str:copy_type>/', views.print_receipt, name='print_receipt'),
     path('print-profit/<int:order_id>/', views.print_profit_receipt, name='print_profit_receipt'),
     path('refund/<int:order_id>/', views.refund_order, name='refund_order'),
