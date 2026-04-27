@@ -6,6 +6,7 @@ urlpatterns = [
     path('', views.pos_home, name='pos_home'),
     path('order/<int:order_id>/', views.pos_home, name='pos_order'),
     path('new-order/', views.create_new_order, name='create_new_order'),
+    path('order/<int:order_id>/delete/', views.delete_order, name='delete_order'),
     path('order/<int:order_id>/delete-empty/', views.delete_empty_order, name='delete_empty_order'),
     path('order/<int:order_id>/remove-item/<int:item_id>/', views.remove_order_item, name='remove_order_item'),
     path('device/', views.device_setup, name='device_setup'),

@@ -95,11 +95,12 @@
                                 + New Bill
                             </a>
                             {% if can_delete_order %}
-                                <form method="post" action="{% url 'delete_empty_order' order.id %}" class="inline">
+                                <form method="post" action="{% url 'delete_order' order.id %}" class="inline">
                                     {% csrf_token %}
                                     <button type="submit"
+                                            onclick="return confirm('Delete bill #{{ order.order_number }}? This will remove all items on it.');"
                                             class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-semibold hover:bg-red-100">
-                                        Delete Empty
+                                        Delete Bill
                                     </button>
                                 </form>
                             {% endif %}

@@ -35,7 +35,7 @@
                             <th class="p-3 text-left">Date</th>
                             <th class="p-3 text-left">Status</th>
                             <th class="p-3 text-right">Total</th>
-                            <th class="p-3 text-center">Print</th>
+                            <th class="p-3 text-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -53,7 +53,17 @@
                             <td class="p-3 text-right font-semibold text-slate-900">{{ o.total_amount|whole }}</td>
                             <td class="p-3">
                                 {% if o.status == 'refunded' %}
-                                    <div class="text-center text-xs text-slate-400">Printing disabled</div>
+                                    <div class="flex flex-wrap justify-center gap-2">
+                                        <div class="text-xs text-slate-400 px-3 py-2">Printing disabled</div>
+                                        <form method="post" action="{% url 'delete_order' o.id %}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                            <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-extrabold hover:bg-red-100"
+                                                    onclick="return confirm('Delete bill #{{ o.order_number }}? This will remove its items, payments, and print jobs.');">
+                                                Delete
+                                            </button>
+                                        </form>
+                                    </div>
                                 {% else %}
                                     <div class="flex flex-wrap justify-center gap-2">
                                         <form method="post" action="{% url 'print_profit_receipt' o.id %}">
@@ -66,6 +76,14 @@
                                             {% csrf_token %}
                                             <button class="px-3 py-2 rounded-lg bg-slate-700 text-white text-sm font-extrabold hover:bg-slate-800">
                                                 Customer
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{% url 'delete_order' o.id %}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                            <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-extrabold hover:bg-red-100"
+                                                    onclick="return confirm('Delete bill #{{ o.order_number }}? This will remove its items, payments, and print jobs.');">
+                                                Delete
                                             </button>
                                         </form>
                                     </div>

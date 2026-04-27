@@ -116,3 +116,71 @@ class ProductSearchTests(TestCase):
         self.assertEqual(list(response.context["products"]), [matching])
         self.assertContains(response, "Cement")
         self.assertNotContains(response, "1m LED 300N")
+
+
+class OrderDeleteTests(TestCase):
+    def test_unpaid_order_with_items_can_be_deleted(self):
+        order = Order.objects.create(order_number=1, status="unpaid")
+        OrderItem.objects.create(
+            order=order,
+            item_name="Mistake item",
+            quantity=Decimal("2"),
+            selling_price=Decimal("10"),
+            cost_price_snapshot=Decimal("4"),
+        )
+
+        response = self.client.post(reverse("delete_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Order.objects.filter(id=order.id).exists())
+        self.assertFalse(OrderItem.objects.filter(order_id=order.id).exists())
+
+    def test_paid_order_can_be_deleted_with_payment_records(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
+        order = Order.objects.create(order_number=2, status="paid", is_active=False, created_at=paid_at)
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal("10"),
+            change_given=Decimal("0"),
+            paid_at=paid_at,
+        )
+
+        response = self.client.post(reverse("delete_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Order.objects.filter(id=order.id).exists())
+        self.assertFalse(Payment.objects.filter(order_id=order.id).exists())
+
+    def test_delete_order_removes_related_print_jobs(self):
+        order = Order.objects.create(order_number=3, status="unpaid")
+        job = PrintJob.objects.create(
+            job_type=PrintJob.JOB_SALE_RECEIPT,
+            copy_type=PrintJob.COPY_CUSTOMER,
+            payload={"order_id": order.id, "order_number": order.order_number, "receipt_text": "test"},
+        )
+        other_job = PrintJob.objects.create(
+            job_type=PrintJob.JOB_SALE_RECEIPT,
+            copy_type=PrintJob.COPY_CUSTOMER,
+            payload={"order_id": 999, "order_number": 999, "receipt_text": "test"},
+        )
+
+        response = self.client.post(reverse("delete_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Order.objects.filter(id=order.id).exists())
+        self.assertFalse(PrintJob.objects.filter(id=job.id).exists())
+        self.assertTrue(PrintJob.objects.filter(id=other_job.id).exists())
+
+    def test_delete_order_redirects_to_safe_next_url(self):
+        order = Order.objects.create(order_number=4, status="paid", is_active=False)
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal("10"),
+            change_given=Decimal("0"),
+        )
+
+        response = self.client.post(reverse("delete_order", args=[order.id]), {"next": reverse("reprint_orders")})
+
+        self.assertRedirects(response, reverse("reprint_orders"))

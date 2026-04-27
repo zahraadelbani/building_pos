@@ -31,7 +31,7 @@
             <tr>
                 <th class="p-3 text-left text-xs uppercase tracking-wide text-slate-500">Order</th>
                 <th class="p-3 text-right text-xs uppercase tracking-wide text-slate-500">Total</th>
-                <th class="p-3 text-center text-xs uppercase tracking-wide text-slate-500">Action</th>
+                <th class="p-3 text-center text-xs uppercase tracking-wide text-slate-500">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -44,6 +44,15 @@
                        class="bg-slate-900 text-white px-4 py-2 rounded-lg font-extrabold hover:bg-slate-800 inline-block">
                         Reopen
                     </a>
+                    <form method="post" action="{% url 'delete_order' o.id %}" class="inline-block ml-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit"
+                                onclick="return confirm('Delete bill #{{ o.order_number }}? This will remove all items on it.');"
+                                class="border border-red-200 bg-red-50 text-red-800 px-4 py-2 rounded-lg font-extrabold hover:bg-red-100">
+                            Delete
+                        </button>
+                    </form>
                 </td>
             </tr>
             {% empty %}

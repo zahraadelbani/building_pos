@@ -124,7 +124,7 @@ def pos_home(request, order_id=None):
             "total": order.total_amount(),
             "query": query,
             "products": products,
-            "can_delete_order": (not order.items.exists() and not order.payments.exists()),
+            "can_delete_order": (order.status == "unpaid" and not order.payments.exists()),
             "device_id": get_device_id(request),
         },
     )
@@ -365,20 +365,26 @@ def add_product_to_order(request, order_id, product_id):
     return redirect("pos_order", order_id=order_id)
 
 
-def delete_empty_order(request, order_id):
+def delete_order(request, order_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
 
-    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id)
+        order_number = order.order_number
 
-    if order.items.exists() or order.payments.exists():
-        messages.error(request, "This bill cannot be deleted because it is not empty.")
-        return redirect("pos_order", order_id=order_id)
+        Payment.objects.filter(order=order).delete()
+        PrintJob.objects.filter(payload__order_id=order.id).delete()
+        order.delete()
 
-    order_number = order.order_number
-    order.delete()
-    messages.success(request, f"Deleted empty bill #{order_number}.")
+    messages.success(request, f"Deleted bill #{order_number}.")
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
     return redirect("pos_home")
+
+
+delete_empty_order = delete_order
 
 
 def remove_order_item(request, order_id, item_id):

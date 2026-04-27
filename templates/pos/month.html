@@ -85,6 +85,7 @@
                                 <th class="p-3 text-left">Time</th>
                                 <th class="p-3 text-right">Total</th>
                                 <th class="p-3 text-right">Profit</th>
+                                <th class="p-3 text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -103,10 +104,20 @@
                                 <td class="p-3 text-right text-slate-800">
                                     {{ o.total_profit|whole }}
                                 </td>
+                                <td class="p-3 text-center">
+                                    <form method="post" action="{% url 'delete_order' o.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-extrabold hover:bg-red-100"
+                                                onclick="return confirm('Delete bill #{{ o.order_number }}? This will remove it from sales reports.');">
+                                            Delete
+                                        </button>
+                                    </form>
+                                </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="5" class="p-8 text-center text-slate-400">
+                                <td colspan="6" class="p-8 text-center text-slate-400">
                                     No paid orders for this month.
                                 </td>
                             </tr>
