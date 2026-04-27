@@ -9,6 +9,7 @@ urlpatterns = [
     path('order/<int:order_id>/delete/', views.delete_order, name='delete_order'),
     path('order/<int:order_id>/delete-empty/', views.delete_empty_order, name='delete_empty_order'),
     path('order/<int:order_id>/remove-item/<int:item_id>/', views.remove_order_item, name='remove_order_item'),
+    path('order/<int:order_id>/update-item/<int:item_id>/', views.update_order_item, name='update_order_item'),
     path('device/', views.device_setup, name='device_setup'),
     path('reprint/', views.reprint_orders, name='reprint_orders'),
     path('day/', views.day_view, name='day_view'),

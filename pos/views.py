@@ -400,6 +400,39 @@ def remove_order_item(request, order_id, item_id):
     return redirect("pos_order", order_id=order_id)
 
 
+def update_order_item(request, order_id, item_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    item = get_object_or_404(OrderItem, id=item_id, order=order)
+
+    quantity_raw = (request.POST.get("quantity") or "").strip()
+    selling_price_raw = (request.POST.get("selling_price") or "").strip()
+    box = (request.POST.get("box") or "").strip()
+    if len(box) > 50:
+        box = box[:50]
+
+    try:
+        quantity = Decimal(quantity_raw)
+        selling_price = Decimal(selling_price_raw)
+    except Exception:
+        messages.error(request, "Quantity and selling price must be valid numbers.")
+        return redirect("pos_order", order_id=order_id)
+
+    if quantity <= 0 or selling_price <= 0:
+        messages.error(request, "Quantity and selling price must be greater than 0.")
+        return redirect("pos_order", order_id=order_id)
+
+    item.quantity = quantity
+    item.selling_price = selling_price
+    item.box = box or None
+    item.save(update_fields=["quantity", "selling_price", "box"])
+
+    messages.success(request, f"Updated item: {item.item_name}")
+    return redirect("pos_order", order_id=order_id)
+
+
 def pay_later(request, order_id):
     order = get_object_or_404(Order, id=order_id, status="unpaid")
     order.is_active = False
