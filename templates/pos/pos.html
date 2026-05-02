@@ -197,7 +197,7 @@
                                         </button>
                                     </form>
 
-                                    <div class="text-xs text-slate-500">Tip: search and click <span class="font-semibold">Select</span> below.</div>
+                                    <div class="text-xs text-slate-500">Tip: type product code or name, then press <span class="font-semibold">Enter</span>.</div>
                                 </div>
                             </div>
                         </div>
@@ -385,6 +385,12 @@
                                     Print Profit Copy
                                 </button>
                             </form>
+
+                            <button type="button"
+                                    id="custom-item-open"
+                                    class="w-full rounded-xl border border-slate-200 bg-white text-slate-800 px-6 py-3 text-base font-extrabold text-center hover:bg-slate-50">
+                                Add Custom Item
+                            </button>
                         </div>
                     </div>
 
@@ -396,6 +402,77 @@
             </div>
 
         </div>
+    </div>
+</div>
+
+<!-- ================= CUSTOM ITEM MODAL ================= -->
+<div id="custom-item-modal"
+     class="fixed inset-0 hidden items-center justify-center z-50 p-4"
+     style="background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+    <div class="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div>
+                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Custom Item</div>
+                <div class="text-lg font-extrabold text-slate-900">Order #{{ order.order_number }}</div>
+            </div>
+            <button type="button" id="custom-item-close" class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                Close
+            </button>
+        </div>
+
+        <form method="post" action="{% url 'add_custom_item_to_order' order.id %}" class="p-6 space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+            <div class="flex flex-col gap-1">
+                <label class="text-sm font-semibold text-slate-700">Item name</label>
+                <input type="text" name="item_name" id="custom-item-name" maxlength="255"
+                       class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
+                       placeholder="Custom item"
+                       required>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-semibold text-slate-700">Quantity</label>
+                    <input type="number" step="0.01" min="0.01" name="quantity" value="1"
+                           class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
+                           required>
+                </div>
+
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-semibold text-slate-700">Selling price</label>
+                    <input type="number" step="0.01" min="0.01" name="selling_price"
+                           class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
+                           placeholder="0"
+                           required>
+                </div>
+
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-semibold text-slate-700">Cost</label>
+                    <input type="number" step="0.01" min="0" name="cost_price"
+                           class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
+                           placeholder="0">
+                </div>
+
+                <div class="flex flex-col gap-1">
+                    <label class="text-sm font-semibold text-slate-700">Box</label>
+                    <input type="text" name="box" maxlength="50"
+                           class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white">
+                </div>
+            </div>
+
+            <div class="flex gap-3 pt-2">
+                <button type="submit"
+                        class="flex-1 rounded-xl bg-slate-900 text-white px-6 py-3 text-base font-extrabold hover:bg-slate-800">
+                    Add to bill
+                </button>
+                <button type="button" id="custom-item-cancel"
+                        class="px-6 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-base font-extrabold hover:bg-slate-50">
+                    Cancel
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -511,11 +588,74 @@
         const selectedSelling = document.getElementById("selected-selling");
         const selectedBox = document.getElementById("selected-box");
         let selectedActionUrl = "";
+        let lastSearchValue = "";
+
+        function selectProductButton(button) {
+            if (!button) return false;
+
+            const productName = button.getAttribute("data-product-name") || "";
+            const actionUrl = button.getAttribute("data-action-url") || "";
+            if (!actionUrl) return false;
+
+            selectedActionUrl = actionUrl;
+            if (selectedForm) selectedForm.setAttribute("action", selectedActionUrl);
+            if (selectedName) selectedName.textContent = productName || "Selected";
+            if (selectedAddBtn) selectedAddBtn.disabled = false;
+
+            const sellingPrice = button.getAttribute("data-selling-price") || "";
+            if (selectedSelling) selectedSelling.value = sellingPrice;
+            if (selectedBox) selectedBox.value = "";
+            if (selectedQty) {
+                selectedQty.focus();
+                selectedQty.select();
+            }
+            return true;
+        }
+
+        function firstSelectableProduct() {
+            if (!results) return null;
+            return results.querySelector("[data-select-product]");
+        }
+
+        function fetchResults(value) {
+            if (!results || !searchUrl) return Promise.resolve(false);
+
+            const url = new URL(searchUrl, window.location.origin);
+            url.searchParams.set("partial", "1");
+            if (value) {
+                url.searchParams.set("q", value);
+            }
+
+            lastSearchValue = value;
+
+            return fetch(url.toString(), { headers: { "X-Requested-With": "XMLHttpRequest" } })
+                .then((r) => r.text())
+                .then((html) => {
+                    results.innerHTML = html;
+                    return true;
+                })
+                .catch(() => false);
+        }
 
         input.addEventListener("keydown", function (e) {
-            if (e.key === "Enter") {
-                e.preventDefault();
+            if (e.key !== "Enter") return;
+
+            e.preventDefault();
+            const value = (input.value || "").trim();
+            if (!value) return;
+
+            if (timer) {
+                window.clearTimeout(timer);
+                timer = null;
             }
+
+            if (lastSearchValue === value && selectProductButton(firstSelectableProduct())) {
+                return;
+            }
+
+            fetchResults(value).then(function (ok) {
+                if (ok) selectProductButton(firstSelectableProduct());
+            });
         });
 
         input.addEventListener("input", function () {
@@ -523,17 +663,7 @@
             if (timer) window.clearTimeout(timer);
 
             timer = window.setTimeout(function () {
-                if (!results || !searchUrl) return;
-                const url = new URL(searchUrl, window.location.origin);
-                url.searchParams.set("partial", "1");
-                if (value) {
-                    url.searchParams.set("q", value);
-                }
-
-                fetch(url.toString(), { headers: { "X-Requested-With": "XMLHttpRequest" } })
-                    .then((r) => r.text())
-                    .then((html) => { results.innerHTML = html; })
-                    .catch(() => { /* keep old results */ });
+                fetchResults(value);
             }, 200);
         });
 
@@ -541,20 +671,7 @@
             results.addEventListener("click", function (e) {
                 const button = e.target.closest("[data-select-product]");
                 if (!button) return;
-
-                const productName = button.getAttribute("data-product-name") || "";
-                const actionUrl = button.getAttribute("data-action-url") || "";
-                if (!actionUrl) return;
-
-                selectedActionUrl = actionUrl;
-                if (selectedForm) selectedForm.setAttribute("action", selectedActionUrl);
-                if (selectedName) selectedName.textContent = productName || "Selected";
-                if (selectedAddBtn) selectedAddBtn.disabled = false;
-
-                if (selectedQty) selectedQty.focus();
-                const sellingPrice = button.getAttribute("data-selling-price") || "";
-                if (selectedSelling) selectedSelling.value = sellingPrice;
-                if (selectedBox) selectedBox.value = "";
+                selectProductButton(button);
             });
         }
 
@@ -565,6 +682,46 @@
                 }
             });
         }
+    })();
+</script>
+
+<script>
+    (function () {
+        const openBtn = document.getElementById("custom-item-open");
+        const modal = document.getElementById("custom-item-modal");
+        const closeBtn = document.getElementById("custom-item-close");
+        const cancelBtn = document.getElementById("custom-item-cancel");
+        const nameInput = document.getElementById("custom-item-name");
+
+        function openModal() {
+            if (!modal) return;
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            window.setTimeout(function () {
+                if (nameInput) nameInput.focus();
+            }, 0);
+        }
+
+        function closeModal() {
+            if (!modal) return;
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+
+        if (openBtn) openBtn.addEventListener("click", openModal);
+        if (closeBtn) closeBtn.addEventListener("click", closeModal);
+        if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+        if (modal) {
+            modal.addEventListener("click", function (e) {
+                if (e.target === modal) closeModal();
+            });
+        }
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape" && modal && !modal.classList.contains("hidden")) {
+                closeModal();
+            }
+        });
     })();
 </script>
 

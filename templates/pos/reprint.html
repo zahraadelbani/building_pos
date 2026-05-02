@@ -54,6 +54,10 @@
                             <td class="p-3">
                                 {% if o.status == 'refunded' %}
                                     <div class="flex flex-wrap justify-center gap-2">
+                                        <a href="{% url 'view_order' o.id %}?next={{ request.get_full_path|urlencode }}"
+                                           class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm font-extrabold hover:bg-slate-50">
+                                            View
+                                        </a>
                                         <div class="text-xs text-slate-400 px-3 py-2">Printing disabled</div>
                                         <form method="post" action="{% url 'delete_order' o.id %}">
                                             {% csrf_token %}
@@ -66,6 +70,10 @@
                                     </div>
                                 {% else %}
                                     <div class="flex flex-wrap justify-center gap-2">
+                                        <a href="{% url 'view_order' o.id %}?next={{ request.get_full_path|urlencode }}"
+                                           class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm font-extrabold hover:bg-slate-50">
+                                            View
+                                        </a>
                                         <form method="post" action="{% url 'print_profit_receipt' o.id %}">
                                             {% csrf_token %}
                                             <button class="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-extrabold hover:bg-slate-900">

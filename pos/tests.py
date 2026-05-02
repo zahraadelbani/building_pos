@@ -118,6 +118,59 @@ class ProductSearchTests(TestCase):
         self.assertNotContains(response, "1m LED 300N")
 
 
+class CustomItemTests(TestCase):
+    def test_custom_item_is_added_to_order_without_creating_product(self):
+        order = Order.objects.create(order_number=10, status="unpaid")
+
+        response = self.client.post(
+            reverse("add_custom_item_to_order", args=[order.id]),
+            {
+                "item_name": "Delivery charge",
+                "quantity": "1",
+                "selling_price": "25",
+                "cost_price": "5",
+                "box": "A1",
+            },
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        item = OrderItem.objects.get(order=order)
+        self.assertIsNone(item.product)
+        self.assertEqual(item.item_name, "Delivery charge")
+        self.assertEqual(item.quantity, Decimal("1"))
+        self.assertEqual(item.selling_price, Decimal("25"))
+        self.assertEqual(item.cost_price_snapshot, Decimal("5"))
+        self.assertEqual(item.box, "A1")
+        self.assertFalse(Product.objects.exists())
+
+    def test_custom_item_counts_in_day_and_month_totals(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 13, 9, 0))
+        order = Order.objects.create(order_number=11, status="paid", is_active=False, created_at=paid_at)
+        OrderItem.objects.create(
+            order=order,
+            product=None,
+            item_name="One-off fitting",
+            quantity=Decimal("2"),
+            selling_price=Decimal("40"),
+            cost_price_snapshot=Decimal("15"),
+        )
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal("80"),
+            change_given=Decimal("0"),
+            paid_at=paid_at,
+        )
+
+        day_response = self.client.get(reverse("day_view"), {"date": "2026-04-13"})
+        month_response = self.client.get(reverse("month_view"), {"month": "2026-04"})
+
+        self.assertEqual(day_response.context["total_sales"], Decimal("80"))
+        self.assertEqual(day_response.context["total_profit"], Decimal("50"))
+        self.assertEqual(month_response.context["total_sales"], Decimal("80"))
+        self.assertEqual(month_response.context["total_profit"], Decimal("50"))
+
+
 class OrderDeleteTests(TestCase):
     def test_unpaid_order_with_items_can_be_deleted(self):
         order = Order.objects.create(order_number=1, status="unpaid")
@@ -184,3 +237,51 @@ class OrderDeleteTests(TestCase):
         response = self.client.post(reverse("delete_order", args=[order.id]), {"next": reverse("reprint_orders")})
 
         self.assertRedirects(response, reverse("reprint_orders"))
+
+
+class OrderViewTests(TestCase):
+    def test_reprint_page_links_to_read_only_order_view(self):
+        order = Order.objects.create(order_number=5, status="paid", is_active=False)
+        OrderItem.objects.create(
+            order=order,
+            item_name="Cement",
+            quantity=Decimal("2"),
+            selling_price=Decimal("100"),
+            cost_price_snapshot=Decimal("70"),
+        )
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal("200"),
+            change_given=Decimal("0"),
+        )
+
+        response = self.client.get(reverse("reprint_orders"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "View")
+        self.assertContains(response, reverse("view_order", args=[order.id]))
+
+    def test_order_view_shows_order_without_creating_print_job(self):
+        order = Order.objects.create(order_number=6, status="paid", is_active=False)
+        OrderItem.objects.create(
+            order=order,
+            item_name="Steel",
+            quantity=Decimal("3"),
+            selling_price=Decimal("250"),
+            cost_price_snapshot=Decimal("180"),
+        )
+        Payment.objects.create(
+            order=order,
+            method="cash",
+            amount_received=Decimal("750"),
+            change_given=Decimal("0"),
+        )
+
+        response = self.client.get(reverse("view_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Order #6")
+        self.assertContains(response, "Steel")
+        self.assertContains(response, "750")
+        self.assertFalse(PrintJob.objects.exists())

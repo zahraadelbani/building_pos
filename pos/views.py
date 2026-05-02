@@ -8,6 +8,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
@@ -181,6 +182,28 @@ def reprint_orders(request):
             "orders": page_obj,
             "page_obj": page_obj,
             "query": query,
+        },
+    )
+
+
+def view_order(request, order_id):
+    order = get_object_or_404(
+        Order.objects.exclude(status="unpaid").prefetch_related("items", "payments"),
+        id=order_id,
+    )
+    back_url = request.GET.get("next") or ""
+    if not back_url or not url_has_allowed_host_and_scheme(back_url, allowed_hosts={request.get_host()}):
+        back_url = None
+
+    return render(
+        request,
+        "pos/order_view.html",
+        {
+            "order": order,
+            "items": order.items.all(),
+            "payments": order.payments.all().order_by("paid_at"),
+            "total": order.total_amount(),
+            "back_url": back_url,
         },
     )
 
@@ -363,6 +386,55 @@ def add_product_to_order(request, order_id, product_id):
         return redirect(next_url)
 
     return redirect("pos_order", order_id=order_id)
+
+
+def add_custom_item_to_order(request, order_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    item_name = (request.POST.get("item_name") or "").strip()
+    quantity_raw = (request.POST.get("quantity") or "").strip()
+    selling_price_raw = (request.POST.get("selling_price") or "").strip()
+    cost_price_raw = (request.POST.get("cost_price") or "").strip()
+    box = (request.POST.get("box") or "").strip()
+
+    next_url = request.POST.get("next")
+    if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = reverse("pos_order", args=[order.id])
+
+    if len(item_name) > 255:
+        item_name = item_name[:255]
+    if len(box) > 50:
+        box = box[:50]
+
+    try:
+        quantity = Decimal(quantity_raw)
+        selling_price = Decimal(selling_price_raw)
+        cost_price = Decimal(cost_price_raw) if cost_price_raw else Decimal("0")
+    except Exception:
+        messages.error(request, "Custom item quantity, price, and cost must be valid numbers.")
+        return redirect(next_url)
+
+    if not item_name:
+        messages.error(request, "Custom item name is required.")
+        return redirect(next_url)
+    if quantity <= 0 or selling_price <= 0 or cost_price < 0:
+        messages.error(request, "Custom item quantity and price must be greater than 0. Cost must be 0 or more.")
+        return redirect(next_url)
+
+    OrderItem.objects.create(
+        order=order,
+        product=None,
+        item_name=item_name,
+        quantity=quantity,
+        selling_price=selling_price,
+        box=box or None,
+        cost_price_snapshot=cost_price,
+    )
+
+    messages.success(request, f"Added custom item: {item_name}")
+    return redirect(next_url)
 
 
 def delete_order(request, order_id):

@@ -12,6 +12,7 @@ urlpatterns = [
     path('order/<int:order_id>/update-item/<int:item_id>/', views.update_order_item, name='update_order_item'),
     path('device/', views.device_setup, name='device_setup'),
     path('reprint/', views.reprint_orders, name='reprint_orders'),
+    path('order/<int:order_id>/view/', views.view_order, name='view_order'),
     path('day/', views.day_view, name='day_view'),
     path('month/', views.month_view, name='month_view'),
 
@@ -21,6 +22,7 @@ urlpatterns = [
     path('products/<int:product_id>/delete/', views.delete_product, name='delete_product'),
     path('products/<int:product_id>/barcode/', views.product_barcode, name='product_barcode'),
     path('order/<int:order_id>/add-product/<int:product_id>/', views.add_product_to_order, name='add_product_to_order'),
+    path('order/<int:order_id>/add-custom-item/', views.add_custom_item_to_order, name='add_custom_item_to_order'),
 
     path('unpaid-orders/', views.unpaid_orders, name='unpaid_orders'),
     path('resume-order/<int:order_id>/', views.resume_order, name='resume_order'),
