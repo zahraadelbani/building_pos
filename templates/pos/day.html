@@ -11,7 +11,7 @@
             </div>
             <a href="{% url 'pos_home' %}"
                class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
-                Back to POS
+                <span class="inline-flex items-center gap-2"><i class="bi bi-arrow-left"></i><span>Back to POS</span></span>
             </a>
         </div>
 
@@ -23,11 +23,11 @@
                            class="border border-slate-200 rounded-xl px-3 py-2 text-base bg-white">
                 </div>
                 <button class="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-extrabold hover:bg-slate-800">
-                    Apply
+                    <span class="inline-flex items-center gap-2"><i class="bi bi-funnel"></i><span>Apply</span></span>
                 </button>
             </form>
 
-            <div class="grid gap-4 sm:grid-cols-3">
+            <div class="grid gap-4 sm:grid-cols-4">
                 <div class="rounded-2xl border border-slate-200 p-4">
                     <div class="text-xs font-semibold text-slate-500 uppercase">Date</div>
                     <div class="mt-1 text-lg font-extrabold text-slate-900">
@@ -41,9 +41,33 @@
                     </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 p-4">
-                    <div class="text-xs font-semibold text-slate-500 uppercase">Total Profit</div>
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Gross Profit</div>
                     <div class="mt-1 text-2xl font-extrabold text-slate-900">
                         {{ total_profit|whole }}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Cash</div>
+                    <div class="mt-1 text-2xl font-extrabold text-emerald-700">
+                        {{ total_cash|whole }}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Wave</div>
+                    <div class="mt-1 text-2xl font-extrabold text-teal-700">
+                        {{ total_wave|whole }}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Expenses</div>
+                    <div class="mt-1 text-2xl font-extrabold text-red-700">
+                        {{ total_expenses|whole }}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 p-4 sm:col-span-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Net Profit</div>
+                    <div class="mt-1 text-3xl font-extrabold text-slate-900">
+                        {{ net_profit|whole }}
                     </div>
                 </div>
             </div>
@@ -53,14 +77,14 @@
                     {% csrf_token %}
                     <input type="hidden" name="date" value="{{ selected_date|date:'Y-m-d' }}">
                     <button class="px-5 py-2 rounded-xl bg-slate-800 text-white text-sm font-extrabold hover:bg-slate-900">
-                        Print Day Summary
+                        <span class="inline-flex items-center gap-2"><i class="bi bi-printer"></i><span>Print Day Summary</span></span>
                     </button>
                 </form>
                 <form method="post" action="{% url 'print_day_receipts' %}">
                     {% csrf_token %}
                     <input type="hidden" name="date" value="{{ selected_date|date:'Y-m-d' }}">
                     <button class="px-5 py-2 rounded-xl bg-slate-700 text-white text-sm font-extrabold hover:bg-slate-800">
-                        Print All Receipts
+                        <span class="inline-flex items-center gap-2"><i class="bi bi-receipt-cutoff"></i><span>Print All Receipts</span></span>
                     </button>
                 </form>
             </div>
@@ -76,6 +100,7 @@
                             <tr>
                                 <th class="p-3 text-left">Order #</th>
                                 <th class="p-3 text-left">Time</th>
+                                <th class="p-3 text-left">Payment</th>
                                 <th class="p-3 text-right">Total</th>
                                 <th class="p-3 text-right">Profit</th>
                                 <th class="p-3 text-center">Actions</th>
@@ -87,6 +112,9 @@
                                 <td class="p-3 font-semibold text-slate-900">#{{ o.order_number }}</td>
                                 <td class="p-3 text-slate-700">
                                     {{ o.created_at|date:"H:i" }}
+                                </td>
+                                <td class="p-3 text-slate-700">
+                                    {{ o.payment_display }}
                                 </td>
                                 <td class="p-3 text-right text-slate-800">
                                     {{ o.total_amount|whole }}
@@ -100,15 +128,59 @@
                                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
                                         <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-extrabold hover:bg-red-100"
                                                 onclick="return confirm('Delete bill #{{ o.order_number }}? This will remove it from sales reports.');">
-                                            Delete
+                                            <span class="inline-flex items-center gap-2"><i class="bi bi-trash"></i><span>Delete</span></span>
                                         </button>
                                     </form>
                                 </td>
                             </tr>
                         {% empty %}
                             <tr>
-                                <td colspan="5" class="p-8 text-center text-slate-400">
+                                <td colspan="6" class="p-8 text-center text-slate-400">
                                     No paid orders for this date.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 overflow-hidden">
+                <div class="bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between">
+                    <span>Expenses</span>
+                    <span class="text-xs text-slate-500">{{ total_expenses|whole }} total</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-white border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="p-3 text-left">Category</th>
+                                <th class="p-3 text-left">Description</th>
+                                <th class="p-3 text-right">Amount</th>
+                                <th class="p-3 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for expense in expenses %}
+                            <tr class="border-t border-slate-100">
+                                <td class="p-3 text-slate-700">{{ expense.get_category_display }}</td>
+                                <td class="p-3 font-semibold text-slate-900">{{ expense.description }}</td>
+                                <td class="p-3 text-right text-red-700 font-semibold">{{ expense.amount|whole }}</td>
+                                <td class="p-3 text-center">
+                                    <form method="post" action="{% url 'delete_expense' expense.id %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                        <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm font-extrabold hover:bg-red-100"
+                                                onclick="return confirm('Delete this expense?');">
+                                            <span class="inline-flex items-center gap-2"><i class="bi bi-trash"></i><span>Delete</span></span>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="p-8 text-center text-slate-400">
+                                    No expenses for this date.
                                 </td>
                             </tr>
                         {% endfor %}

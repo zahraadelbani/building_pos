@@ -1,6 +1,6 @@
 from django.db import transaction
 
-from .models import Order, PrintJob
+from .models import Expense, Order, PrintJob
 from .receipt import (
     LINE_WIDTH_80MM,
     day_summary_text,
@@ -109,9 +109,10 @@ def enqueue_day_summary(*, date, target_device_id: str):
     orders = Order.objects.filter(
         status="paid",
         payments__paid_at__date=date,
-    ).order_by("order_number")
+    ).prefetch_related("payments").order_by("order_number")
     orders = orders.distinct()
-    text = day_summary_text(date=date, orders=orders, width=LINE_WIDTH_80MM)
+    expenses = Expense.objects.filter(date=date).order_by("created_at", "id")
+    text = day_summary_text(date=date, orders=orders, expenses=expenses, width=LINE_WIDTH_80MM)
 
     PrintJob.objects.create(
         job_type=PrintJob.JOB_DAY_SUMMARY,
@@ -127,9 +128,10 @@ def enqueue_month_summary(*, year: int, month: int, target_device_id: str):
         status="paid",
         payments__paid_at__year=year,
         payments__paid_at__month=month,
-    ).order_by("order_number")
+    ).prefetch_related("payments").order_by("order_number")
     orders = orders.distinct()
-    text = month_summary_text(year=year, month=month, orders=orders, width=LINE_WIDTH_80MM)
+    expenses = Expense.objects.filter(date__year=year, date__month=month).order_by("date", "created_at", "id")
+    text = month_summary_text(year=year, month=month, orders=orders, expenses=expenses, width=LINE_WIDTH_80MM)
 
     PrintJob.objects.create(
         job_type=PrintJob.JOB_MONTH_SUMMARY,

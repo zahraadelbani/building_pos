@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .models import Order, OrderItem, Payment, PrintJob, Product
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, StockMovement
 from .printing import (
     enqueue_day_summary,
     enqueue_month_summary,
@@ -30,6 +30,111 @@ DEVICE_ID_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
 
 def _next_product_code():
     return (Product.objects.aggregate(max_code=Max("code"))["max_code"] or 0) + 1
+
+
+def _product_code_ordering():
+    return ("code", "name", "id")
+
+
+def _sum_expenses(expenses):
+    return expenses.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+
+def _safe_next_url(request, fallback):
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return next_url
+    return fallback
+
+
+def _order_product_quantities(order):
+    quantities = {}
+    for item in order.items.exclude(product__isnull=True).select_related("product"):
+        quantities[item.product_id] = quantities.get(item.product_id, Decimal("0")) + Decimal(item.quantity)
+    return quantities
+
+
+def _deduct_order_stock(order):
+    if order.stock_deducted_at:
+        return
+
+    quantities = _order_product_quantities(order)
+    if not quantities:
+        order.stock_deducted_at = timezone.now()
+        order.save(update_fields=["stock_deducted_at"])
+        return
+
+    products = {
+        product.id: product
+        for product in Product.objects.select_for_update().filter(id__in=quantities.keys())
+    }
+    for product_id, quantity in quantities.items():
+        product = products.get(product_id)
+        if not product:
+            continue
+        product.stock_quantity -= quantity
+        product.save(update_fields=["stock_quantity"])
+        StockMovement.objects.create(
+            product=product,
+            order=order,
+            movement_type=StockMovement.TYPE_SALE,
+            quantity_delta=-quantity,
+            reason=f"Sale order #{order.order_number}",
+        )
+
+    order.stock_deducted_at = timezone.now()
+    order.save(update_fields=["stock_deducted_at"])
+
+
+def _restore_order_stock(order, reason_prefix="Refund"):
+    if not order.stock_deducted_at:
+        return
+
+    quantities = _order_product_quantities(order)
+    products = {
+        product.id: product
+        for product in Product.objects.select_for_update().filter(id__in=quantities.keys())
+    }
+    for product_id, quantity in quantities.items():
+        product = products.get(product_id)
+        if not product:
+            continue
+        product.stock_quantity += quantity
+        product.save(update_fields=["stock_quantity"])
+        StockMovement.objects.create(
+            product=product,
+            order=order,
+            movement_type=StockMovement.TYPE_REFUND,
+            quantity_delta=quantity,
+            reason=f"{reason_prefix} order #{order.order_number}",
+        )
+
+    order.stock_deducted_at = None
+    order.save(update_fields=["stock_deducted_at"])
+
+
+def _cash_wave_breakdown(orders):
+    cash = Decimal("0")
+    wave = Decimal("0")
+    for order in orders:
+        method_totals = {}
+        for payment in order.payments.all():
+            amount = Decimal(str(payment.amount_received or 0))
+            if payment.method == "cash":
+                amount -= Decimal(str(payment.change_given or 0))
+                cash += amount
+            elif payment.method == "wave":
+                wave += amount
+            method_totals[payment.method] = method_totals.get(payment.method, Decimal("0")) + amount
+        labels = []
+        if method_totals.get("cash"):
+            labels.append(f"Cash {method_totals['cash']}")
+        if method_totals.get("wave"):
+            labels.append(f"Wave {method_totals['wave']}")
+        if not labels:
+            labels = [payment.method.upper() for payment in order.payments.all()]
+        order.payment_display = ", ".join(labels) if labels else "-"
+    return cash, wave
 
 
 def get_device_id(request):
@@ -102,7 +207,7 @@ def pos_home(request, order_id=None):
             qs = qs.filter(code=int(query))
         else:
             qs = qs.filter(name__icontains=query)
-        products = list(qs.order_by("name")[:30])
+        products = list(qs.order_by(*_product_code_ordering())[:30])
 
     if request.GET.get("partial") == "1":
         return render(
@@ -134,7 +239,7 @@ def pos_home(request, order_id=None):
 def products_page(request):
     query = (request.GET.get("q") or request.GET.get("product_q") or "").strip()
 
-    products = Product.objects.all().order_by("name")
+    products = Product.objects.all().order_by(*_product_code_ordering())
     if query:
         if query.isdigit():
             products = products.filter(code=int(query))
@@ -153,6 +258,61 @@ def products_page(request):
             "page_obj": page_obj,
             "query": query,
             "next_product_code": _next_product_code(),
+            "today": timezone.localdate(),
+        },
+    )
+
+
+def stock_movements_page(request):
+    product_id = (request.GET.get("product") or "").strip()
+    movement_type = (request.GET.get("type") or "").strip()
+    raw_date = (request.GET.get("date") or "").strip()
+
+    movements = StockMovement.objects.select_related("product", "order").order_by("-occurred_at", "-id")
+    selected_product = ""
+    selected_type = ""
+    selected_date = None
+
+    if product_id:
+        try:
+            selected_product = str(int(product_id))
+            movements = movements.filter(product_id=selected_product)
+        except Exception:
+            selected_product = ""
+
+    valid_types = {choice[0] for choice in StockMovement.TYPE_CHOICES}
+    if movement_type in valid_types:
+        selected_type = movement_type
+        movements = movements.filter(movement_type=movement_type)
+
+    if raw_date:
+        try:
+            selected_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            movements = movements.filter(occurred_at__date=selected_date)
+        except Exception:
+            selected_date = None
+
+    total_in = movements.filter(quantity_delta__gt=0).aggregate(total=Sum("quantity_delta"))["total"] or Decimal("0")
+    total_out = movements.filter(quantity_delta__lt=0).aggregate(total=Sum("quantity_delta"))["total"] or Decimal("0")
+
+    paginator = Paginator(movements, 30)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "pos/stock_movements.html",
+        {
+            "movements": page_obj,
+            "page_obj": page_obj,
+            "products": Product.objects.all().order_by(*_product_code_ordering()),
+            "movement_type_choices": StockMovement.TYPE_CHOICES,
+            "selected_product": selected_product,
+            "selected_type": selected_type,
+            "selected_date_value": selected_date.strftime("%Y-%m-%d") if selected_date else "",
+            "total_movement_count": paginator.count,
+            "total_in": total_in,
+            "total_out": total_out,
         },
     )
 
@@ -216,6 +376,7 @@ def edit_product(request, product_id):
         name = (request.POST.get("name") or "").strip()
         cost_price = (request.POST.get("cost_price") or "").strip()
         selling_price = (request.POST.get("selling_price") or "").strip()
+        low_stock_threshold_raw = (request.POST.get("low_stock_threshold") or "").strip()
 
         code = None
         if code_raw != "":
@@ -247,10 +408,21 @@ def edit_product(request, product_id):
             messages.error(request, "Selling price must be a valid number (greater than 0).")
             return redirect("edit_product", product_id=product.id)
 
+        try:
+            low_stock_threshold = (
+                Decimal(low_stock_threshold_raw) if low_stock_threshold_raw != "" else Decimal("0")
+            )
+            if low_stock_threshold < 0:
+                raise ValueError()
+        except Exception:
+            messages.error(request, "Low stock threshold must be a valid number (0 or more).")
+            return redirect("edit_product", product_id=product.id)
+
         product.code = code
         product.name = name
         product.cost_price = cost_price
         product.selling_price = selling_price
+        product.low_stock_threshold = low_stock_threshold
         try:
             product.save()
         except IntegrityError:
@@ -281,6 +453,182 @@ def delete_product(request, product_id):
     return redirect("products")
 
 
+def adjust_product_stock(request, product_id):
+    if request.method != "POST":
+        return redirect("products")
+
+    next_url = _safe_next_url(request, reverse("products"))
+    adjustment_type = (request.POST.get("adjustment_type") or "").strip()
+    quantity_raw = (request.POST.get("quantity") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    note = (request.POST.get("note") or "").strip()
+    occurred_at_raw = (request.POST.get("occurred_at") or "").strip()
+
+    try:
+        quantity = Decimal(quantity_raw)
+    except Exception:
+        messages.error(request, "Stock quantity must be a valid number.")
+        return redirect(next_url)
+
+    if quantity <= 0:
+        messages.error(request, "Stock quantity must be greater than 0.")
+        return redirect(next_url)
+
+    if adjustment_type not in {"restock", "reduce"}:
+        messages.error(request, "Stock movement type is required.")
+        return redirect(next_url)
+
+    try:
+        occurred_date = datetime.strptime(occurred_at_raw, "%Y-%m-%d").date() if occurred_at_raw else timezone.localdate()
+    except Exception:
+        messages.error(request, "Stock movement date must be valid.")
+        return redirect(next_url)
+
+    occurred_at = timezone.make_aware(datetime.combine(occurred_date, datetime.min.time()))
+
+    with transaction.atomic():
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        delta = quantity if adjustment_type == "restock" else -quantity
+        if product.stock_quantity + delta < 0:
+            messages.error(
+                request,
+                f"Cannot reduce {product.name} by {quantity}; only {product.stock_quantity} in stock.",
+            )
+            return redirect(next_url)
+
+        product.stock_quantity += delta
+        product.save(update_fields=["stock_quantity"])
+        StockMovement.objects.create(
+            product=product,
+            movement_type=(
+                StockMovement.TYPE_RESTOCK
+                if adjustment_type == "restock"
+                else StockMovement.TYPE_ADJUSTMENT
+            ),
+            quantity_delta=delta,
+            reason=reason[:255] or ("Restock" if adjustment_type == "restock" else "Stock adjustment"),
+            note=note,
+            occurred_at=occurred_at,
+        )
+
+    messages.success(request, f"Updated stock for {product.name}.")
+    return redirect(next_url)
+
+
+def expenses_page(request):
+    raw_date = (request.GET.get("date") or "").strip()
+    raw_month = (request.GET.get("month") or "").strip()
+    category = (request.GET.get("category") or "").strip()
+
+    expenses = Expense.objects.all()
+    selected_date = None
+    selected_month_value = ""
+
+    if raw_date:
+        try:
+            selected_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            expenses = expenses.filter(date=selected_date)
+        except Exception:
+            selected_date = None
+    elif raw_month:
+        try:
+            selected_dt = datetime.strptime(raw_month, "%Y-%m")
+            selected_month_value = f"{selected_dt.year:04d}-{selected_dt.month:02d}"
+            expenses = expenses.filter(date__year=selected_dt.year, date__month=selected_dt.month)
+        except Exception:
+            selected_month_value = ""
+
+    valid_categories = {choice[0] for choice in Expense.CATEGORY_CHOICES}
+    if category in valid_categories:
+        expenses = expenses.filter(category=category)
+    else:
+        category = ""
+
+    total_expenses = _sum_expenses(expenses)
+    paginator = Paginator(expenses, 25)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "pos/expenses.html",
+        {
+            "expenses": page_obj,
+            "page_obj": page_obj,
+            "category_choices": Expense.CATEGORY_CHOICES,
+            "selected_date": selected_date,
+            "selected_date_value": selected_date.strftime("%Y-%m-%d") if selected_date else "",
+            "selected_month_value": selected_month_value,
+            "selected_category": category,
+            "total_expenses": total_expenses,
+            "today": timezone.localdate(),
+        },
+    )
+
+
+def create_expense(request):
+    if request.method != "POST":
+        return redirect("expenses")
+
+    date_raw = (request.POST.get("date") or "").strip()
+    category = (request.POST.get("category") or "").strip()
+    description = (request.POST.get("description") or "").strip()
+    amount_raw = (request.POST.get("amount") or "").strip()
+    notes = (request.POST.get("notes") or "").strip()
+
+    next_url = request.POST.get("next")
+    if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = reverse("expenses")
+
+    try:
+        expense_date = datetime.strptime(date_raw, "%Y-%m-%d").date() if date_raw else timezone.localdate()
+    except Exception:
+        messages.error(request, "Expense date must be valid.")
+        return redirect(next_url)
+
+    if category not in {choice[0] for choice in Expense.CATEGORY_CHOICES}:
+        messages.error(request, "Expense category must be valid.")
+        return redirect(next_url)
+
+    try:
+        amount = Decimal(amount_raw)
+    except Exception:
+        messages.error(request, "Expense amount must be a valid number.")
+        return redirect(next_url)
+
+    if not description:
+        messages.error(request, "Expense description is required.")
+        return redirect(next_url)
+    if amount <= 0:
+        messages.error(request, "Expense amount must be greater than 0.")
+        return redirect(next_url)
+
+    Expense.objects.create(
+        date=expense_date,
+        category=category,
+        description=description[:255],
+        amount=amount,
+        notes=notes,
+    )
+    messages.success(request, f"Added expense: {description[:60]}")
+    return redirect(next_url)
+
+
+def delete_expense(request, expense_id):
+    if request.method != "POST":
+        return redirect("expenses")
+
+    expense = get_object_or_404(Expense, id=expense_id)
+    description = expense.description
+    expense.delete()
+    messages.success(request, f"Deleted expense: {description[:60]}")
+
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
+    return redirect("expenses")
+
+
 def create_product(request):
     if request.method != "POST":
         return redirect("products")
@@ -289,6 +637,8 @@ def create_product(request):
     name = request.POST.get("name", "").strip()
     cost_price = request.POST.get("cost_price", "").strip()
     selling_price = request.POST.get("selling_price", "").strip()
+    stock_quantity_raw = request.POST.get("stock_quantity", "").strip()
+    low_stock_threshold_raw = request.POST.get("low_stock_threshold", "").strip()
 
     next_url = request.POST.get("next")
     if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
@@ -327,7 +677,37 @@ def create_product(request):
         return redirect(next_url)
 
     try:
-        Product.objects.create(code=code, name=name, cost_price=cost_price, selling_price=selling_price)
+        stock_quantity = Decimal(stock_quantity_raw) if stock_quantity_raw else Decimal("0")
+        if stock_quantity < 0:
+            raise ValueError()
+    except Exception:
+        messages.error(request, "Opening stock must be a valid number (0 or more).")
+        return redirect(next_url)
+
+    try:
+        low_stock_threshold = Decimal(low_stock_threshold_raw) if low_stock_threshold_raw else Decimal("5")
+        if low_stock_threshold < 0:
+            raise ValueError()
+    except Exception:
+        messages.error(request, "Low stock threshold must be a valid number (0 or more).")
+        return redirect(next_url)
+
+    try:
+        product = Product.objects.create(
+            code=code,
+            name=name,
+            cost_price=cost_price,
+            selling_price=selling_price,
+            stock_quantity=stock_quantity,
+            low_stock_threshold=low_stock_threshold,
+        )
+        if stock_quantity > 0:
+            StockMovement.objects.create(
+                product=product,
+                movement_type=StockMovement.TYPE_RESTOCK,
+                quantity_delta=stock_quantity,
+                reason="Opening stock",
+            )
     except IntegrityError:
         messages.error(request, "That product name or code is already in use.")
         return redirect(next_url)
@@ -340,8 +720,9 @@ def add_product_to_order(request, order_id, product_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
 
-    order = get_object_or_404(Order, id=order_id, status="unpaid")
-    product = get_object_or_404(Product, id=product_id)
+    next_url = request.POST.get("next")
+    if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = reverse("pos_order", args=[order_id])
 
     quantity = request.POST.get("quantity", "").strip()
     selling_price_raw = request.POST.get("selling_price", "").strip()
@@ -361,31 +742,31 @@ def add_product_to_order(request, order_id, product_id):
         except Exception:
             selling_price = None
 
-    if selling_price is None:
-        selling_price = product.selling_price
-
-    if quantity <= 0 or selling_price <= 0:
+    if quantity <= 0:
         messages.error(request, "Quantity and selling price are required (must be greater than 0).")
-        next_url = request.POST.get("next")
-        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-            return redirect(next_url)
-        return redirect("pos_order", order_id=order_id)
-
-    OrderItem.objects.create(
-        order=order,
-        product=product,
-        item_name=product.name,
-        quantity=quantity,
-        selling_price=selling_price,
-        box=box or None,
-        cost_price_snapshot=product.cost_price,
-    )
-
-    next_url = request.POST.get("next")
-    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
 
-    return redirect("pos_order", order_id=order_id)
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="unpaid")
+        product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        if selling_price is None:
+            selling_price = product.selling_price
+
+        if selling_price <= 0:
+            messages.error(request, "Quantity and selling price are required (must be greater than 0).")
+            return redirect(next_url)
+
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=quantity,
+            selling_price=selling_price,
+            box=box or None,
+            cost_price_snapshot=product.cost_price,
+        )
+
+    return redirect(next_url)
 
 
 def add_custom_item_to_order(request, order_id):
@@ -437,6 +818,47 @@ def add_custom_item_to_order(request, order_id):
     return redirect(next_url)
 
 
+def update_order_details(request, order_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    next_url = _safe_next_url(request, reverse("pos_order", args=[order.id]))
+
+    customer_name = (request.POST.get("customer_name") or "").strip()
+    discount_type = (request.POST.get("discount_type") or Order.DISCOUNT_NONE).strip()
+    discount_value_raw = (request.POST.get("discount_value") or "").strip()
+
+    if discount_type not in {choice[0] for choice in Order.DISCOUNT_TYPE_CHOICES}:
+        messages.error(request, "Discount type must be valid.")
+        return redirect(next_url)
+
+    try:
+        discount_value = Decimal(discount_value_raw) if discount_value_raw else Decimal("0")
+    except Exception:
+        messages.error(request, "Discount value must be a valid number.")
+        return redirect(next_url)
+
+    if discount_type == Order.DISCOUNT_NONE:
+        discount_value = Decimal("0")
+    if discount_value < 0:
+        messages.error(request, "Discount cannot be negative.")
+        return redirect(next_url)
+    if discount_type == Order.DISCOUNT_PERCENT and discount_value > 100:
+        messages.error(request, "Percent discount cannot be more than 100.")
+        return redirect(next_url)
+    if discount_type == Order.DISCOUNT_AMOUNT and discount_value > Decimal(str(order.subtotal_amount())):
+        messages.error(request, "Discount amount cannot be more than the subtotal.")
+        return redirect(next_url)
+
+    order.customer_name = customer_name[:255]
+    order.discount_type = discount_type
+    order.discount_value = discount_value
+    order.save(update_fields=["customer_name", "discount_type", "discount_value"])
+    messages.success(request, "Updated bill details.")
+    return redirect(next_url)
+
+
 def delete_order(request, order_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
@@ -444,6 +866,8 @@ def delete_order(request, order_id):
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id)
         order_number = order.order_number
+        if order.status == "paid":
+            _restore_order_stock(order, reason_prefix="Deleted paid")
 
         Payment.objects.filter(order=order).delete()
         PrintJob.objects.filter(payload__order_id=order.id).delete()
@@ -476,9 +900,6 @@ def update_order_item(request, order_id, item_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
 
-    order = get_object_or_404(Order, id=order_id, status="unpaid")
-    item = get_object_or_404(OrderItem, id=item_id, order=order)
-
     quantity_raw = (request.POST.get("quantity") or "").strip()
     selling_price_raw = (request.POST.get("selling_price") or "").strip()
     box = (request.POST.get("box") or "").strip()
@@ -496,10 +917,18 @@ def update_order_item(request, order_id, item_id):
         messages.error(request, "Quantity and selling price must be greater than 0.")
         return redirect("pos_order", order_id=order_id)
 
-    item.quantity = quantity
-    item.selling_price = selling_price
-    item.box = box or None
-    item.save(update_fields=["quantity", "selling_price", "box"])
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="unpaid")
+        item = get_object_or_404(
+            OrderItem.objects.select_for_update().select_related("product"),
+            id=item_id,
+            order=order,
+        )
+
+        item.quantity = quantity
+        item.selling_price = selling_price
+        item.box = box or None
+        item.save(update_fields=["quantity", "selling_price", "box"])
 
     messages.success(request, f"Updated item: {item.item_name}")
     return redirect("pos_order", order_id=order_id)
@@ -626,8 +1055,7 @@ def pay_order(request, order_id):
         if not error:
             try:
                 with transaction.atomic():
-                    Order.objects.select_for_update().get(id=order.id)
-
+                    order = Order.objects.select_for_update().get(id=order.id)
                     for pay_method, pay_amount, pay_bank in payments_to_create:
                         Payment.objects.create(
                             order=order,
@@ -640,6 +1068,7 @@ def pay_order(request, order_id):
                     order.status = "paid"
                     order.is_active = False
                     order.save()
+                    _deduct_order_stock(order)
             except ValueError as e:
                 error = str(e)
             else:
@@ -703,6 +1132,31 @@ def mark_order_paid(request, order_id):
         messages.error(request, "Add at least one item before marking the order as paid.")
         return redirect("pos_order", order_id=order_id)
 
+    method = (request.POST.get("method") or "cash").strip()
+    valid_methods = {choice[0] for choice in Payment.PAYMENT_METHODS}
+    if method not in valid_methods:
+        messages.error(request, "Payment method must be valid.")
+        return redirect("pos_order", order_id=order_id)
+
+    bank_name = (request.POST.get("bank_name") or "").strip()
+    if method == "bank" and not bank_name:
+        messages.error(request, "Bank name is required for bank transfers.")
+        return redirect("pos_order", order_id=order_id)
+
+    amount_raw = (request.POST.get("amount_received") or "").strip()
+    try:
+        amount_received = Decimal(amount_raw) if amount_raw else total
+    except Exception:
+        messages.error(request, "Payment amount must be a valid number.")
+        return redirect("pos_order", order_id=order_id)
+
+    if method != "cash" and amount_received != total:
+        messages.error(request, f"{method.upper()} amount must equal the order total.")
+        return redirect("pos_order", order_id=order_id)
+    if method == "cash" and amount_received < total:
+        messages.error(request, "Cash amount is less than the order total.")
+        return redirect("pos_order", order_id=order_id)
+
     with transaction.atomic():
         order = Order.objects.select_for_update().get(id=order.id)
         if order.status != "unpaid":
@@ -710,15 +1164,17 @@ def mark_order_paid(request, order_id):
 
         Payment.objects.create(
             order=order,
-            method="cash",
-            amount_received=total,
-            change_given=Decimal("0.00"),
+            method=method,
+            bank_name=bank_name if method == "bank" else None,
+            amount_received=amount_received,
+            change_given=amount_received - total if method == "cash" else Decimal("0.00"),
         )
         order.status = "paid"
         order.is_active = False
         order.save()
+        _deduct_order_stock(order)
 
-    messages.success(request, f"Order #{order.order_number} marked as paid.")
+    messages.success(request, f"Order #{order.order_number} marked as paid by {method.upper()}.")
     return redirect("pos_home")
 
 
@@ -772,7 +1228,8 @@ def refund_order(request, order_id):
 
     if request.method == "POST":
         with transaction.atomic():
-            Order.objects.select_for_update().get(id=order.id)
+            order = Order.objects.select_for_update().get(id=order.id)
+            _restore_order_stock(order, reason_prefix="Refund")
 
             order.status = "refunded"
             order.is_active = False
@@ -814,11 +1271,15 @@ def day_view(request):
         Order.objects.filter(status="paid", payments__paid_at__date=selected)
         .distinct()
         .order_by("order_number")
-        .prefetch_related("items")
+        .prefetch_related("items", "payments")
     )
 
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    total_cash, total_wave = _cash_wave_breakdown(orders_qs)
+    expenses_qs = Expense.objects.filter(date=selected).order_by("-created_at", "-id")
+    total_expenses = _sum_expenses(expenses_qs)
+    net_profit = total_profit - total_expenses
     paginator = Paginator(orders_qs, 25)
     page_number = request.GET.get("page") or 1
     page_obj = paginator.get_page(page_number)
@@ -833,6 +1294,12 @@ def day_view(request):
             "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
+            "total_cash": total_cash,
+            "total_wave": total_wave,
+            "expenses": expenses_qs,
+            "total_expenses": total_expenses,
+            "net_profit": net_profit,
+            "category_choices": Expense.CATEGORY_CHOICES,
         },
     )
 
@@ -860,11 +1327,15 @@ def month_view(request):
         )
         .distinct()
         .order_by("order_number")
-        .prefetch_related("items")
+        .prefetch_related("items", "payments")
     )
 
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    total_cash, total_wave = _cash_wave_breakdown(orders_qs)
+    expenses_qs = Expense.objects.filter(date__year=selected_year, date__month=selected_month)
+    total_expenses = _sum_expenses(expenses_qs)
+    net_profit = total_profit - total_expenses
     paginator = Paginator(orders_qs, 25)
     page_number = request.GET.get("page") or 1
     page_obj = paginator.get_page(page_number)
@@ -882,6 +1353,10 @@ def month_view(request):
             "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
+            "total_cash": total_cash,
+            "total_wave": total_wave,
+            "total_expenses": total_expenses,
+            "net_profit": net_profit,
         },
     )
 

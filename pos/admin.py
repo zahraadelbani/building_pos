@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, OrderItem, Payment, PrintJob, Product
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, StockMovement
 
 
 class OrderItemInline(admin.TabularInline):
@@ -21,6 +21,9 @@ class OrderAdmin(admin.ModelAdmin):
     list_display = (
         'order_number',
         'status',
+        'customer_name',
+        'discount_type',
+        'discount_value',
         'created_at',
         'total_amount',
     )
@@ -49,10 +52,42 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "cost_price",
+        "selling_price",
+        "stock_quantity",
+        "low_stock_threshold",
         "created_at",
     )
     search_fields = ("name",)
     ordering = ("name",)
+
+
+@admin.register(Expense)
+class ExpenseAdmin(admin.ModelAdmin):
+    list_display = (
+        "date",
+        "category",
+        "description",
+        "amount",
+        "created_at",
+    )
+    list_filter = ("category", "date")
+    search_fields = ("description", "notes")
+    ordering = ("-date", "-created_at")
+
+
+@admin.register(StockMovement)
+class StockMovementAdmin(admin.ModelAdmin):
+    list_display = (
+        "occurred_at",
+        "product",
+        "movement_type",
+        "quantity_delta",
+        "reason",
+        "order",
+    )
+    list_filter = ("movement_type", "occurred_at")
+    search_fields = ("product__name", "reason", "note")
+    ordering = ("-occurred_at", "-id")
 
 
 @admin.register(PrintJob)

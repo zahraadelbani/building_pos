@@ -5,8 +5,9 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Order, OrderItem, Payment, PrintJob, Product
-from .receipt import month_summary_text
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, StockMovement
+from .receipt import day_summary_text, month_summary_text
+from .receipt import sale_receipt_text
 
 
 class MonthSummaryTests(TestCase):
@@ -43,6 +44,8 @@ class MonthSummaryTests(TestCase):
         self.assertNotContains(response, "#102")
         self.assertEqual(response.context["total_sales"], Decimal("100"))
         self.assertEqual(response.context["total_profit"], Decimal("40"))
+        self.assertEqual(response.context["total_expenses"], Decimal("0"))
+        self.assertEqual(response.context["net_profit"], Decimal("40"))
 
     def test_day_view_paginates_paid_orders_without_changing_totals(self):
         paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
@@ -97,8 +100,143 @@ class MonthSummaryTests(TestCase):
         self.assertIn("2026-04", text)
         self.assertIn("Total Sales", text)
         self.assertIn("48", text)
-        self.assertIn("Total Profit", text)
+        self.assertIn("Gross Profit", text)
         self.assertIn("28", text)
+
+    def test_day_view_subtracts_expenses_from_net_profit(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 14, 11, 0))
+        order = self._create_paid_order(order_number=105, paid_at=paid_at, quantity="2", cost="20", selling="50")
+        Expense.objects.create(
+            date=paid_at.date(),
+            category=Expense.CATEGORY_UTILITIES,
+            description="Electricity",
+            amount=Decimal("15"),
+        )
+        Expense.objects.create(
+            date=paid_at.date(),
+            category=Expense.CATEGORY_TRANSPORT,
+            description="Delivery fuel",
+            amount=Decimal("5"),
+        )
+
+        response = self.client.get(reverse("day_view"), {"date": "2026-04-14"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_profit"], Decimal("60"))
+        self.assertEqual(response.context["total_expenses"], Decimal("20"))
+        self.assertEqual(response.context["net_profit"], Decimal("40"))
+        self.assertContains(response, "Net Profit")
+        self.assertContains(response, "Electricity")
+
+        text = day_summary_text(date=paid_at.date(), orders=[order], expenses=Expense.objects.all())
+        self.assertIn("Total Expenses", text)
+        self.assertIn("Net Profit", text)
+        self.assertIn("40", text)
+
+    def test_day_summary_text_includes_wave_payment_breakdown(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 14, 12, 0))
+        order = self._create_paid_order(order_number=107, paid_at=paid_at, quantity="2", cost="20", selling="50")
+        order.payments.all().delete()
+        Payment.objects.create(
+            order=order,
+            method="wave",
+            amount_received=Decimal("100"),
+            change_given=Decimal("0"),
+            paid_at=paid_at,
+        )
+
+        text = day_summary_text(date=paid_at.date(), orders=[order])
+
+        self.assertIn("Payment Breakdown", text)
+        self.assertIn("Wave", text)
+        self.assertIn("100", text)
+        self.assertNotIn("Bank", text)
+        self.assertNotIn("APS", text)
+        self.assertIn("Gross Profit", text)
+        self.assertIn("Net Profit", text)
+
+    def test_day_view_shows_cash_and_wave_payment_totals_and_order_method(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 14, 13, 0))
+        cash_order = self._create_paid_order(order_number=109, paid_at=paid_at, quantity="1", cost="10", selling="25")
+        wave_order = self._create_paid_order(order_number=110, paid_at=paid_at, quantity="1", cost="10", selling="40")
+        wave_order.payments.all().delete()
+        Payment.objects.create(
+            order=wave_order,
+            method="wave",
+            amount_received=Decimal("40"),
+            paid_at=paid_at,
+        )
+
+        response = self.client.get(reverse("day_view"), {"date": "2026-04-14"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_cash"], Decimal("25"))
+        self.assertEqual(response.context["total_wave"], Decimal("40"))
+        self.assertContains(response, "Cash 25")
+        self.assertContains(response, "Wave 40")
+
+    def test_month_view_subtracts_expenses_from_net_profit(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 15, 10, 0))
+        self._create_paid_order(order_number=106, paid_at=paid_at, quantity="3", cost="10", selling="30")
+        Expense.objects.create(
+            date=paid_at.date(),
+            category=Expense.CATEGORY_RENT,
+            description="Shop rent",
+            amount=Decimal("25"),
+        )
+        Expense.objects.create(
+            date=datetime(2026, 5, 1).date(),
+            category=Expense.CATEGORY_REPAIRS,
+            description="May repair",
+            amount=Decimal("99"),
+        )
+
+        response = self.client.get(reverse("month_view"), {"month": "2026-04"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_profit"], Decimal("60"))
+        self.assertEqual(response.context["total_expenses"], Decimal("25"))
+        self.assertEqual(response.context["net_profit"], Decimal("35"))
+
+    def test_month_summary_text_includes_wave_payment_breakdown(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 16, 12, 0))
+        order = self._create_paid_order(order_number=108, paid_at=paid_at, quantity="1", cost="10", selling="45")
+        order.payments.all().delete()
+        Payment.objects.create(
+            order=order,
+            method="wave",
+            amount_received=Decimal("45"),
+            change_given=Decimal("0"),
+            paid_at=paid_at,
+        )
+
+        text = month_summary_text(year=2026, month=4, orders=[order])
+
+        self.assertIn("Payment Breakdown", text)
+        self.assertIn("Wave", text)
+        self.assertIn("45", text)
+        self.assertNotIn("Bank", text)
+        self.assertNotIn("APS", text)
+
+    def test_month_view_shows_cash_and_wave_payment_totals_and_order_method(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 17, 13, 0))
+        cash_order = self._create_paid_order(order_number=111, paid_at=paid_at, quantity="1", cost="10", selling="30")
+        wave_order = self._create_paid_order(order_number=112, paid_at=paid_at, quantity="1", cost="10", selling="55")
+        wave_order.payments.all().delete()
+        Payment.objects.create(
+            order=wave_order,
+            method="wave",
+            amount_received=Decimal("55"),
+            paid_at=paid_at,
+        )
+
+        response = self.client.get(reverse("month_view"), {"month": "2026-04"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_cash"], Decimal("30"))
+        self.assertEqual(response.context["total_wave"], Decimal("55"))
+        self.assertContains(response, "Cash 30")
+        self.assertContains(response, "Wave 55")
 
 
 class ProductSearchTests(TestCase):
@@ -116,6 +254,38 @@ class ProductSearchTests(TestCase):
         self.assertEqual(list(response.context["products"]), [matching])
         self.assertContains(response, "Cement")
         self.assertNotContains(response, "1m LED 300N")
+
+    def test_pos_search_orders_products_by_code(self):
+        order = Order.objects.create(order_number=2, status="unpaid")
+        first = Product.objects.create(
+            code=1,
+            name="Cement 50kg",
+            cost_price=Decimal("10"),
+            selling_price=Decimal("15"),
+            stock_quantity=Decimal("5"),
+        )
+        third = Product.objects.create(
+            code=3,
+            name="Cement grey",
+            cost_price=Decimal("12"),
+            selling_price=Decimal("18"),
+            stock_quantity=Decimal("5"),
+        )
+        second = Product.objects.create(
+            code=2,
+            name="Cement white",
+            cost_price=Decimal("11"),
+            selling_price=Decimal("16"),
+            stock_quantity=Decimal("5"),
+        )
+
+        response = self.client.get(
+            reverse("pos_order", args=[order.id]),
+            {"q": "Cement", "partial": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["products"]), [first, second, third])
 
 
 class CustomItemTests(TestCase):
@@ -169,6 +339,335 @@ class CustomItemTests(TestCase):
         self.assertEqual(day_response.context["total_profit"], Decimal("50"))
         self.assertEqual(month_response.context["total_sales"], Decimal("80"))
         self.assertEqual(month_response.context["total_profit"], Decimal("50"))
+
+
+class DiscountAndCustomerTests(TestCase):
+    def _create_order_with_item(self):
+        order = Order.objects.create(order_number=30, status="unpaid")
+        OrderItem.objects.create(
+            order=order,
+            item_name="Cement",
+            quantity=Decimal("2"),
+            selling_price=Decimal("100"),
+            cost_price_snapshot=Decimal("60"),
+        )
+        return order
+
+    def test_amount_discount_reduces_total_and_profit(self):
+        order = self._create_order_with_item()
+        order.discount_type = Order.DISCOUNT_AMOUNT
+        order.discount_value = Decimal("30")
+        order.save()
+
+        self.assertEqual(order.subtotal_amount(), Decimal("200"))
+        self.assertEqual(order.discount_amount(), Decimal("30"))
+        self.assertEqual(order.total_amount(), Decimal("170"))
+        self.assertEqual(order.total_profit(), Decimal("50"))
+
+    def test_percent_discount_reduces_total(self):
+        order = self._create_order_with_item()
+        order.discount_type = Order.DISCOUNT_PERCENT
+        order.discount_value = Decimal("10")
+        order.save()
+
+        self.assertEqual(order.discount_amount(), Decimal("20"))
+        self.assertEqual(order.total_amount(), Decimal("180"))
+
+    def test_update_order_details_saves_customer_and_discount(self):
+        order = self._create_order_with_item()
+
+        response = self.client.post(
+            reverse("update_order_details", args=[order.id]),
+            {
+                "customer_name": "Fatou Jallow",
+                "discount_type": Order.DISCOUNT_PERCENT,
+                "discount_value": "5",
+            },
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        order.refresh_from_db()
+        self.assertEqual(order.customer_name, "Fatou Jallow")
+        self.assertEqual(order.discount_type, Order.DISCOUNT_PERCENT)
+        self.assertEqual(order.discount_value, Decimal("5.00"))
+        self.assertEqual(order.total_amount(), Decimal("190"))
+
+    def test_receipt_includes_customer_and_discount(self):
+        order = self._create_order_with_item()
+        order.customer_name = "Fatou Jallow"
+        order.discount_type = Order.DISCOUNT_AMOUNT
+        order.discount_value = Decimal("25")
+        order.save()
+
+        text = sale_receipt_text(
+            order=order,
+            items=order.items.all(),
+            total=order.total_amount(),
+            copy_label="CUSTOMER",
+        )
+
+        self.assertIn("Customer", text)
+        self.assertIn("Fatou Jallow", text)
+        self.assertIn("SUBTOTAL", text)
+        self.assertIn("DISCOUNT", text)
+        self.assertIn("175", text)
+
+    def test_mark_paid_uses_discounted_total(self):
+        order = self._create_order_with_item()
+        order.discount_type = Order.DISCOUNT_AMOUNT
+        order.discount_value = Decimal("50")
+        order.save()
+
+        response = self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.amount_received, Decimal("150"))
+
+    def test_mark_paid_can_record_wave_payment(self):
+        order = self._create_order_with_item()
+
+        response = self.client.post(
+            reverse("mark_order_paid", args=[order.id]),
+            {"method": "wave", "amount_received": "200"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.method, "wave")
+        self.assertEqual(payment.amount_received, Decimal("200"))
+
+    def test_wave_payment_requires_exact_amount(self):
+        order = self._create_order_with_item()
+
+        response = self.client.post(
+            reverse("mark_order_paid", args=[order.id]),
+            {"method": "wave", "amount_received": "150"},
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+
+
+class StockLogicTests(TestCase):
+    def test_product_with_no_stock_can_be_added_to_order(self):
+        order = Order.objects.create(order_number=19, status="unpaid")
+        product = Product.objects.create(
+            code=19,
+            name="Blocks",
+            cost_price=Decimal("5"),
+            selling_price=Decimal("8"),
+            stock_quantity=Decimal("0"),
+        )
+
+        response = self.client.post(
+            reverse("add_product_to_order", args=[order.id, product.id]),
+            {"quantity": "1", "selling_price": "8"},
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        item = OrderItem.objects.get(order=order)
+        self.assertEqual(item.product, product)
+        self.assertEqual(item.quantity, Decimal("1.00"))
+
+    def test_product_order_can_exceed_available_stock_when_added(self):
+        order = Order.objects.create(order_number=20, status="unpaid")
+        product = Product.objects.create(
+            code=20,
+            name="Cement",
+            cost_price=Decimal("50"),
+            selling_price=Decimal("75"),
+            stock_quantity=Decimal("5"),
+        )
+
+        response = self.client.post(
+            reverse("add_product_to_order", args=[order.id, product.id]),
+            {"quantity": "6", "selling_price": "75"},
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        self.assertTrue(OrderItem.objects.filter(order=order, product=product).exists())
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("5.00"))
+
+    def test_mark_paid_deducts_product_stock_and_records_movement(self):
+        order = Order.objects.create(order_number=21, status="unpaid")
+        product = Product.objects.create(
+            code=21,
+            name="Steel",
+            cost_price=Decimal("100"),
+            selling_price=Decimal("150"),
+            stock_quantity=Decimal("10"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("3"),
+            selling_price=Decimal("150"),
+            cost_price_snapshot=Decimal("100"),
+        )
+
+        response = self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("pos_home"))
+        product.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("7.00"))
+        self.assertIsNotNone(order.stock_deducted_at)
+        movement = StockMovement.objects.get(product=product)
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_SALE)
+        self.assertEqual(movement.quantity_delta, Decimal("-3.00"))
+
+    def test_mark_paid_allows_negative_stock(self):
+        order = Order.objects.create(order_number=22, status="unpaid")
+        product = Product.objects.create(
+            code=22,
+            name="Pipe",
+            cost_price=Decimal("10"),
+            selling_price=Decimal("20"),
+            stock_quantity=Decimal("2"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("3"),
+            selling_price=Decimal("20"),
+            cost_price_snapshot=Decimal("10"),
+        )
+
+        response = self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("pos_home"))
+        product.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("-1.00"))
+        self.assertEqual(order.status, "paid")
+        movement = StockMovement.objects.get(product=product)
+        self.assertEqual(movement.quantity_delta, Decimal("-3.00"))
+
+    def test_refund_restores_product_stock(self):
+        order = Order.objects.create(order_number=23, status="unpaid")
+        product = Product.objects.create(
+            code=23,
+            name="Paint",
+            cost_price=Decimal("25"),
+            selling_price=Decimal("40"),
+            stock_quantity=Decimal("8"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("2"),
+            selling_price=Decimal("40"),
+            cost_price_snapshot=Decimal("25"),
+        )
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        response = self.client.post(reverse("refund_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("pos_home"))
+        product.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("8.00"))
+        self.assertEqual(order.status, "refunded")
+        self.assertIsNone(order.stock_deducted_at)
+        self.assertEqual(StockMovement.objects.filter(product=product).count(), 2)
+
+    def test_custom_item_payment_does_not_create_stock_movement(self):
+        order = Order.objects.create(order_number=24, status="unpaid")
+        OrderItem.objects.create(
+            order=order,
+            product=None,
+            item_name="Delivery",
+            quantity=Decimal("1"),
+            selling_price=Decimal("10"),
+            cost_price_snapshot=Decimal("0"),
+        )
+
+        response = self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("pos_home"))
+        self.assertFalse(StockMovement.objects.exists())
+
+    def test_manual_stock_adjustment_updates_stock_and_records_reason(self):
+        product = Product.objects.create(
+            code=25,
+            name="Sand",
+            cost_price=Decimal("5"),
+            selling_price=Decimal("8"),
+            stock_quantity=Decimal("4"),
+        )
+
+        response = self.client.post(
+            reverse("adjust_product_stock", args=[product.id]),
+            {
+                "adjustment_type": "restock",
+                "quantity": "6",
+                "reason": "New delivery",
+                "occurred_at": "2026-04-20",
+            },
+        )
+
+        self.assertRedirects(response, reverse("products"))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("10.00"))
+        movement = StockMovement.objects.get(product=product)
+        self.assertEqual(movement.movement_type, StockMovement.TYPE_RESTOCK)
+        self.assertEqual(movement.quantity_delta, Decimal("6.00"))
+        self.assertEqual(movement.reason, "New delivery")
+
+    def test_stock_movements_page_filters_by_product_type_and_date(self):
+        cement = Product.objects.create(
+            code=26,
+            name="Cement bags",
+            cost_price=Decimal("50"),
+            selling_price=Decimal("75"),
+            stock_quantity=Decimal("0"),
+        )
+        steel = Product.objects.create(
+            code=27,
+            name="Steel rods",
+            cost_price=Decimal("100"),
+            selling_price=Decimal("130"),
+            stock_quantity=Decimal("0"),
+        )
+        StockMovement.objects.create(
+            product=cement,
+            movement_type=StockMovement.TYPE_RESTOCK,
+            quantity_delta=Decimal("10"),
+            reason="Cement delivery",
+            occurred_at=timezone.make_aware(datetime(2026, 4, 21, 9, 0)),
+        )
+        StockMovement.objects.create(
+            product=steel,
+            movement_type=StockMovement.TYPE_ADJUSTMENT,
+            quantity_delta=Decimal("-2"),
+            reason="Steel damage",
+            occurred_at=timezone.make_aware(datetime(2026, 4, 22, 9, 0)),
+        )
+
+        response = self.client.get(
+            reverse("stock_movements"),
+            {
+                "product": str(cement.id),
+                "type": StockMovement.TYPE_RESTOCK,
+                "date": "2026-04-21",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Cement delivery")
+        self.assertNotContains(response, "Steel damage")
+        self.assertEqual(response.context["total_movement_count"], 1)
+        self.assertEqual(response.context["total_in"], Decimal("10"))
+        self.assertEqual(response.context["total_out"], Decimal("0"))
 
 
 class OrderDeleteTests(TestCase):

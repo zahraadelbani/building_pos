@@ -10,10 +10,21 @@
     }
     @media (min-width: 900px) {
         .products-layout {
-            grid-template-columns: 1fr 2fr;
+            grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
         }
         .products-left { grid-column: 1; }
         .products-right { grid-column: 2; }
+    }
+    .product-action-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: center;
+        align-items: center;
+    }
+    .product-action-row a,
+    .product-action-row button {
+        white-space: nowrap;
     }
 </style>
 
@@ -28,7 +39,7 @@
             <div class="flex items-center gap-3">
                 <a href="{% url 'pos_home' %}"
                    class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
-                    Back to POS
+                    <span class="inline-flex items-center gap-2"><i class="bi bi-arrow-left"></i><span>Back to POS</span></span>
                 </a>
             </div>
         </div>
@@ -53,7 +64,7 @@
                                 <button type="button"
                                         class="px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-extrabold hover:bg-slate-100"
                                         data-generate-product-code="{{ next_product_code }}">
-                                    Generate
+                                    <span class="inline-flex items-center gap-2"><i class="bi bi-magic"></i><span>Generate</span></span>
                                 </button>
                             </div>
                             <div class="text-xs text-slate-500 mt-1">Suggested next code: #{{ next_product_code }}</div>
@@ -77,8 +88,20 @@
                                    class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white">
                         </div>
 
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Opening stock</label>
+                            <input type="number" step="0.01" min="0" name="stock_quantity" value="0"
+                                   class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Low stock alert</label>
+                            <input type="number" step="0.01" min="0" name="low_stock_threshold" value="5"
+                                   class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white">
+                        </div>
+
                         <button class="w-full bg-slate-900 text-white px-5 py-3 rounded-xl text-base font-extrabold hover:bg-slate-800">
-                            Save Product
+                            <span class="inline-flex items-center gap-2"><i class="bi bi-floppy"></i><span>Save Product</span></span>
                         </button>
                     </form>
                 </div>
@@ -91,7 +114,7 @@
                             <input type="text" name="q" value="{{ query }}" placeholder="Search products"
                                    class="flex-1 border border-slate-200 p-3 rounded-xl text-base bg-white">
                             <button class="bg-slate-900 text-white px-5 py-3 rounded-xl text-base font-extrabold hover:bg-slate-800">
-                                Search
+                                <span class="inline-flex items-center gap-2"><i class="bi bi-search"></i><span>Search</span></span>
                             </button>
                         </form>
                     </div>
@@ -103,6 +126,7 @@
                             <th class="p-3 text-left">Product</th>
                             <th class="p-3 text-right">Cost price</th>
                             <th class="p-3 text-right">Selling price</th>
+                            <th class="p-3 text-right">Stock</th>
                             <th class="p-3 text-center">Actions</th>
                         </tr>
                     </thead>
@@ -124,30 +148,49 @@
                             <td class="p-3 font-semibold text-slate-800">{{ p.name }}</td>
                             <td class="p-3 text-right">{{ p.cost_price|whole }}</td>
                             <td class="p-3 text-right">{{ p.selling_price|whole }}</td>
+                            <td class="p-3 text-right">
+                                <div class="font-extrabold {% if p.stock_quantity <= 0 %}text-red-700{% elif p.stock_quantity <= p.low_stock_threshold %}text-amber-700{% else %}text-emerald-700{% endif %}">
+                                    {{ p.stock_quantity|whole }}
+                                </div>
+                                {% if p.stock_quantity <= 0 %}
+                                    <div class="text-xs font-semibold text-red-700">Out of stock</div>
+                                {% elif p.stock_quantity <= p.low_stock_threshold %}
+                                    <div class="text-xs font-semibold text-amber-700">Low stock</div>
+                                {% endif %}
+                            </td>
                             <td class="p-3 text-center">
+                                <div class="product-action-row">
                                 <a href="{% url 'edit_product' p.id %}"
-                                       class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-extrabold hover:bg-slate-50 inline-block">
-                                        Edit
+                                       class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 font-extrabold hover:bg-slate-50 inline-block">
+                                        <span class="inline-flex items-center gap-2"><i class="bi bi-pencil-square"></i><span>Edit</span></span>
                                 </a>
+                                <button type="button"
+                                        class="px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 font-extrabold hover:bg-emerald-100"
+                                        data-stock-open="1"
+                                        data-stock-url="{% url 'adjust_product_stock' p.id %}"
+                                        data-product-name="{{ p.name }}"
+                                        data-product-stock="{{ p.stock_quantity|whole }}">
+                                    <span class="inline-flex items-center gap-2"><i class="bi bi-box-seam"></i><span>Stock</span></span>
+                                </button>
                                 {% if p.code %}
                                 <a href="{% url 'product_barcode' p.id %}" target="_blank"
-                                   class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-extrabold hover:bg-slate-50 inline-block"
-                                   style="margin-left: 6px;">
-                                    Print barcode
+                                   class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 font-extrabold hover:bg-slate-50 inline-block">
+                                    <span class="inline-flex items-center gap-2"><i class="bi bi-upc-scan"></i><span>Barcode</span></span>
                                 </a>
                                 {% endif %}
-                                <form method="post" action="{% url 'delete_product' p.id %}" style="display:inline-block; margin-left: 6px;">
+                                <form method="post" action="{% url 'delete_product' p.id %}" class="inline">
                                     {% csrf_token %}
-                                    <button class="px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 font-extrabold hover:bg-red-100"
+                                    <button class="px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 font-extrabold hover:bg-red-100"
                                             onclick="return confirm('Delete {{ p.name }}?');">
-                                        Delete
+                                        <span class="inline-flex items-center gap-2"><i class="bi bi-trash"></i><span>Delete</span></span>
                                     </button>
                                 </form>
+                                </div>
                             </td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="5" class="p-10 text-center text-slate-400">
+                            <td colspan="6" class="p-10 text-center text-slate-400">
                                     No products found
                                 </td>
                             </tr>
@@ -177,6 +220,73 @@
     </div>
 </div>
 
+<div id="stock-modal"
+     class="fixed inset-0 hidden items-center justify-center z-50 p-4"
+     style="background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+    <div class="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Stock Adjustment</div>
+                <div class="text-lg font-extrabold text-slate-900 truncate" id="stock-modal-product">Product</div>
+                <div class="text-xs font-semibold text-slate-500">Current stock: <span id="stock-modal-current">0</span></div>
+            </div>
+            <button type="button" id="stock-modal-close"
+                    class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
+                <span class="inline-flex items-center gap-2"><i class="bi bi-x-lg"></i><span>Close</span></span>
+            </button>
+        </div>
+
+        <form method="post" action="" id="stock-modal-form" class="p-6 space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Type</label>
+                    <select name="adjustment_type" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-base bg-white">
+                        <option value="restock">Restock</option>
+                        <option value="reduce">Reduce</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Quantity</label>
+                    <input type="number" step="0.01" min="0.01" name="quantity"
+                           class="w-full border border-slate-200 rounded-xl px-3 py-2 text-base bg-white" required>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Date</label>
+                <input type="date" name="occurred_at" value="{{ today|date:'Y-m-d' }}"
+                       class="w-full border border-slate-200 rounded-xl px-3 py-2 text-base bg-white">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Reason</label>
+                <input type="text" name="reason"
+                       class="w-full border border-slate-200 rounded-xl px-3 py-2 text-base bg-white"
+                       placeholder="New delivery, damage, count correction...">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Note</label>
+                <input type="text" name="note"
+                       class="w-full border border-slate-200 rounded-xl px-3 py-2 text-base bg-white">
+            </div>
+
+            <div class="flex gap-3 pt-2">
+                <button class="flex-1 px-5 py-3 rounded-xl bg-slate-900 text-white text-base font-extrabold hover:bg-slate-800">
+                    <span class="inline-flex items-center gap-2"><i class="bi bi-arrow-repeat"></i><span>Update Stock</span></span>
+                </button>
+                <button type="button" id="stock-modal-cancel"
+                        class="px-5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-base font-extrabold hover:bg-slate-50">
+                    <span class="inline-flex items-center gap-2"><i class="bi bi-x-circle"></i><span>Cancel</span></span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
     document.addEventListener("click", function (event) {
         const button = event.target.closest("[data-generate-product-code]");
@@ -190,6 +300,48 @@
         input.focus();
         input.select();
     });
+</script>
+
+<script>
+    (function () {
+        const modal = document.getElementById("stock-modal");
+        const form = document.getElementById("stock-modal-form");
+        const productName = document.getElementById("stock-modal-product");
+        const currentStock = document.getElementById("stock-modal-current");
+        const closeBtn = document.getElementById("stock-modal-close");
+        const cancelBtn = document.getElementById("stock-modal-cancel");
+
+        function closeModal() {
+            if (!modal) return;
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+
+        document.addEventListener("click", function (event) {
+            const button = event.target.closest("[data-stock-open]");
+            if (!button || !modal || !form) return;
+
+            form.setAttribute("action", button.getAttribute("data-stock-url") || "");
+            if (productName) productName.textContent = button.getAttribute("data-product-name") || "Product";
+            if (currentStock) currentStock.textContent = button.getAttribute("data-product-stock") || "0";
+            form.reset();
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            const qty = form.querySelector("input[name='quantity']");
+            if (qty) window.setTimeout(function () { qty.focus(); }, 0);
+        });
+
+        if (closeBtn) closeBtn.addEventListener("click", closeModal);
+        if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+        if (modal) {
+            modal.addEventListener("click", function (event) {
+                if (event.target === modal) closeModal();
+            });
+        }
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") closeModal();
+        });
+    })();
 </script>
 
 {% endblock %}
