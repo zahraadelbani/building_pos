@@ -359,6 +359,10 @@ def day_summary_text(*, date, orders, expenses=None, width: int = LINE_WIDTH_80M
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))
     lines.append(_line_lr("Wave", _money(payments["wave"]), width))
+    if payments["bank"]:
+        lines.append(_line_lr("Bank", _money(payments["bank"]), width))
+    if payments["aps"]:
+        lines.append(_line_lr("APS", _money(payments["aps"]), width))
     lines.append(_hr(width))
     lines.append(_line_lr("Gross Profit", _money(total_profit), width))
     if expenses:
@@ -409,6 +413,10 @@ def month_summary_text(*, year: int, month: int, orders, expenses=None, width: i
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))
     lines.append(_line_lr("Wave", _money(payments["wave"]), width))
+    if payments["bank"]:
+        lines.append(_line_lr("Bank", _money(payments["bank"]), width))
+    if payments["aps"]:
+        lines.append(_line_lr("APS", _money(payments["aps"]), width))
     lines.append(_hr(width))
     lines.append(_line_lr("Gross Profit", _money(total_profit), width))
     if expenses:

@@ -67,10 +67,12 @@ class ExpenseAdmin(admin.ModelAdmin):
         "date",
         "category",
         "description",
+        "payment_method",
+        "bank_name",
         "amount",
         "created_at",
     )
-    list_filter = ("category", "date")
+    list_filter = ("category", "payment_method", "date")
     search_fields = ("description", "notes")
     ordering = ("-date", "-created_at")
 

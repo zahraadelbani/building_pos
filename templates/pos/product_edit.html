@@ -9,7 +9,7 @@
                 <h1 class="text-2xl font-bold">Edit Product</h1>
                 <p class="text-sm text-slate-500">Update code, name, pricing, and stock alert threshold.</p>
             </div>
-            <a href="{% url 'products' %}"
+            <a href="{{ next_url }}"
                class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
                 <span class="inline-flex items-center gap-2"><i class="bi bi-arrow-left"></i><span>Back</span></span>
             </a>
@@ -18,6 +18,7 @@
         <div class="p-6">
             <form method="post" class="space-y-4">
                 {% csrf_token %}
+                <input type="hidden" name="next" value="{{ next_url }}">
 
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">Product code</label>
@@ -77,7 +78,7 @@
                             class="bg-slate-900 text-white px-6 py-3 rounded-xl text-base font-extrabold hover:bg-slate-800">
                         <span class="inline-flex items-center gap-2"><i class="bi bi-floppy"></i><span>Save Changes</span></span>
                     </button>
-                    <a href="{% url 'products' %}"
+                    <a href="{{ next_url }}"
                        class="bg-slate-100 text-slate-800 px-6 py-3 rounded-xl text-base font-extrabold hover:bg-slate-200">
                         <span class="inline-flex items-center gap-2"><i class="bi bi-x-circle"></i><span>Cancel</span></span>
                     </a>

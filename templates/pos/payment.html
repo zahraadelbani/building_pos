@@ -24,34 +24,69 @@
         <form method="post" class="space-y-4">
             {% csrf_token %}
 
-            <div>
-                <label class="block text-sm font-semibold mb-1 text-slate-700">Payment method</label>
-                <select name="method" required class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white">
-                    <option value="">-- Select --</option>
-                    <option value="cash">Cash</option>
-                    <option value="bank">Bank Transfer</option>
-                    <option value="wave">Wave</option>
-                    <option value="aps">APS</option>
-                </select>
-            </div>
+            <div data-payment-form data-payment-total="{{ total }}" class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                    <div class="text-sm font-extrabold text-slate-900">Split Payment</div>
+                    <div data-payment-status class="text-sm font-bold text-red-700">Remaining: {{ total|whole }}</div>
+                </div>
 
-            <div>
-                <label class="block text-sm font-semibold mb-1 text-slate-700">Amount received</label>
-                <input type="number" step="1" name="amount_received"
-                       class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
-                       required>
-            </div>
+                <div class="space-y-3">
+                    <div data-payment-toggle data-payment-targets="payment-cash-input"
+                         class="border border-slate-200 rounded-xl p-3 cursor-pointer bg-white hover:bg-slate-50">
+                        <div class="flex items-center justify-between gap-3">
+                            <strong>Cash</strong>
+                            <span class="text-xs text-slate-500">Tap to enter amount given</span>
+                        </div>
+                        <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                               type="number" step="0.01" min="0" name="cash" id="payment-cash-input"
+                               class="hidden mt-2 w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
+                               placeholder="0">
+                    </div>
 
-            <div>
-                <label class="block text-sm font-semibold mb-1 text-slate-700">
-                    Bank Name (Bank Transfer only)
-                </label>
-                <input type="text" name="bank_name"
-                       class="w-full border border-slate-200 p-3 rounded-xl text-base bg-white">
+                    <div data-payment-toggle data-payment-targets="payment-bank-input payment-bank-name-input"
+                         class="border border-slate-200 rounded-xl p-3 cursor-pointer bg-white hover:bg-slate-50">
+                        <div class="flex items-center justify-between gap-3">
+                            <strong>Bank</strong>
+                            <span class="text-xs text-slate-500">Enter amount + bank name</span>
+                        </div>
+                        <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                               type="number" step="0.01" min="0" name="bank" id="payment-bank-input"
+                               class="hidden mt-2 w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
+                               placeholder="0">
+                        <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                               type="text" name="bank_name" maxlength="100" id="payment-bank-name-input"
+                               class="hidden mt-2 w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
+                               placeholder="Bank name">
+                    </div>
+
+                    <div data-payment-toggle data-payment-targets="payment-wave-input"
+                         class="border border-slate-200 rounded-xl p-3 cursor-pointer bg-white hover:bg-slate-50">
+                        <div class="flex items-center justify-between gap-3">
+                            <strong>Wave</strong>
+                            <span class="text-xs text-slate-500">Optional</span>
+                        </div>
+                        <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                               type="number" step="0.01" min="0" name="wave" id="payment-wave-input"
+                               class="hidden mt-2 w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
+                               placeholder="0">
+                    </div>
+
+                    <div data-payment-toggle data-payment-targets="payment-aps-input"
+                         class="border border-slate-200 rounded-xl p-3 cursor-pointer bg-white hover:bg-slate-50">
+                        <div class="flex items-center justify-between gap-3">
+                            <strong>APS</strong>
+                            <span class="text-xs text-slate-500">Optional</span>
+                        </div>
+                        <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                               type="number" step="0.01" min="0" name="aps" id="payment-aps-input"
+                               class="hidden mt-2 w-full border border-slate-200 p-3 rounded-xl text-base bg-white"
+                               placeholder="0">
+                    </div>
+                </div>
             </div>
 
             <div class="flex gap-4">
-                <button type="submit"
+                <button type="submit" data-payment-confirm disabled
                         class="bg-teal-700 text-white px-6 py-3 rounded-xl text-base font-extrabold hover:bg-teal-800">
                     <span class="inline-flex items-center gap-2"><i class="bi bi-cash-coin"></i><span>CONFIRM PAYMENT</span></span>
                 </button>
@@ -65,5 +100,65 @@
 
     </div>
 </div>
+
+<script>
+    (function () {
+        function money(value) {
+            const number = Number(value || 0);
+            if (!Number.isFinite(number)) return "0";
+            return Math.round(number).toString();
+        }
+
+        function amount(form, name) {
+            const input = form.querySelector('[name="' + name + '"]');
+            const value = input ? Number(input.value || 0) : 0;
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        function updatePaymentForm(form) {
+            const total = Number(form.dataset.paymentTotal || 0) || 0;
+            const status = form.querySelector("[data-payment-status]");
+            const confirm = form.closest("form").querySelector("[data-payment-confirm]");
+            const paid = amount(form, "cash") + amount(form, "bank") + amount(form, "wave") + amount(form, "aps");
+            const remaining = total - paid;
+
+            if (!status || !confirm) return;
+
+            if (remaining > 0) {
+                status.textContent = "Remaining: " + money(remaining);
+                status.classList.remove("text-emerald-700");
+                status.classList.add("text-red-700");
+                confirm.disabled = true;
+                confirm.classList.add("opacity-50", "cursor-not-allowed");
+                return;
+            }
+
+            status.textContent = remaining < 0 ? "Change: " + money(Math.abs(remaining)) : "Paid in full";
+            status.classList.remove("text-red-700");
+            status.classList.add("text-emerald-700");
+            confirm.disabled = false;
+            confirm.classList.remove("opacity-50", "cursor-not-allowed");
+        }
+
+        document.addEventListener("click", function (event) {
+            const row = event.target.closest("[data-payment-toggle]");
+            if (!row) return;
+            const ids = (row.dataset.paymentTargets || "").split(/\s+/).filter(Boolean);
+            ids.forEach(function (id) {
+                const input = document.getElementById(id);
+                if (input) input.classList.remove("hidden");
+            });
+            const first = ids.map(function (id) { return document.getElementById(id); }).find(Boolean);
+            if (first) window.setTimeout(function () { first.focus(); first.select && first.select(); }, 0);
+        });
+
+        document.querySelectorAll("[data-payment-form]").forEach(function (form) {
+            form.querySelectorAll("input").forEach(function (input) {
+                input.addEventListener("input", function () { updatePaymentForm(form); });
+            });
+            updatePaymentForm(form);
+        });
+    })();
+</script>
 
 {% endblock %}

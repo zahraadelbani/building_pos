@@ -68,10 +68,24 @@ class Expense(models.Model):
         (CATEGORY_OTHER, "Other"),
     ]
 
+    PAYMENT_CASH = "cash"
+    PAYMENT_WAVE = "wave"
+    PAYMENT_BANK = "bank"
+    PAYMENT_APS = "aps"
+
+    PAYMENT_METHODS = [
+        (PAYMENT_CASH, "Cash"),
+        (PAYMENT_WAVE, "Wave"),
+        (PAYMENT_BANK, "Bank"),
+        (PAYMENT_APS, "APS"),
+    ]
+
     date = models.DateField(default=timezone.localdate)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default=CATEGORY_OTHER)
     description = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default=PAYMENT_CASH)
+    bank_name = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -80,6 +94,7 @@ class Expense(models.Model):
         indexes = [
             models.Index(fields=["date"]),
             models.Index(fields=["category"]),
+            models.Index(fields=["payment_method"]),
         ]
 
     def __str__(self):

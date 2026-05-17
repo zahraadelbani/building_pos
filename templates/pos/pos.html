@@ -529,71 +529,109 @@
     </div>
 </div>
 
-<!-- ================= PRINT MODAL ================= -->
+<!-- ================= PAYMENT MODAL ================= -->
 <div id="print-modal"
      class="fixed inset-0 hidden items-center justify-center z-50 p-4"
-     style="background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
-    <div class="bg-white w-full max-w-md rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+     style="background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); overflow-y: auto; align-items: flex-start; padding-top: 1rem; padding-bottom: 1rem;">
+    <div class="bg-white w-full rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+         style="max-width: 520px; max-height: calc(100vh - 2rem); display: flex; flex-direction: column; margin: auto 0;">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
             <div>
-                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Print Receipt</div>
+                <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Payment</div>
                 <div class="text-lg font-extrabold text-slate-900">Order #{{ order.order_number }}</div>
             </div>
-            <div class="flex items-center gap-3">
-                <span class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Receipt Copies</span>
+            <div class="flex items-center gap-2">
                 <button type="button" id="print-close" class="px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50">
                     <span class="inline-flex items-center gap-2"><i class="bi bi-x-lg" aria-hidden="true"></i><span>Close</span></span>
                 </button>
             </div>
         </div>
 
-        <div class="p-6">
-            <p class="mb-2 text-slate-500 text-sm">
-                Order total
-                <strong class="text-slate-800 text-xl ml-2">{{ total|whole }}</strong>
-            </p>
-            <div class="mb-4 text-sm font-semibold text-slate-700">
-                Choose the copy to send to this device.
+        <div id="print-modal-body" class="p-5 overflow-y-auto" style="overflow-y: auto; min-height: 0;">
+            <div class="mb-4 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div class="text-sm font-semibold text-slate-500">Order total</div>
+                <div class="text-2xl font-extrabold text-slate-900 tabular-nums">{{ total|whole }}</div>
             </div>
 
             <div class="grid grid-cols-1 gap-3">
                 <form method="post" action="{% url 'mark_order_paid' order.id %}">
                     {% csrf_token %}
                     <input type="hidden" name="method" value="cash">
-                    <button type="submit" class="w-full rounded-xl border border-emerald-700 bg-emerald-700 text-white px-6 py-4 text-base font-extrabold hover:bg-emerald-800">
+                    <button type="submit" class="w-full rounded-xl border border-emerald-700 bg-emerald-700 text-white px-5 py-3 text-base font-extrabold hover:bg-emerald-800">
                         <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-cash-coin" aria-hidden="true"></i><span>Paid Cash</span></span>
                     </button>
                 </form>
 
-                <form method="post" action="{% url 'mark_order_paid' order.id %}">
-                    {% csrf_token %}
-                    <input type="hidden" name="method" value="wave">
-                    <label class="block text-sm font-semibold text-slate-700 mb-1">Wave amount</label>
-                    <input type="number" step="1" min="0" name="amount_received" value="{{ total|whole }}"
-                           class="w-full border border-slate-200 px-4 py-3 rounded-xl text-base bg-white mb-2"
-                           required>
-                    <button type="submit"
-                            class="w-full rounded-xl border text-white px-6 py-4 text-base font-extrabold"
-                            style="background:#0f766e;border-color:#0f766e;">
-                        <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-phone" aria-hidden="true"></i><span>Paid Wave</span></span>
-                    </button>
-                </form>
+                <details class="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+                    <summary class="cursor-pointer list-none px-4 py-3 text-sm font-extrabold text-slate-800 flex items-center justify-between gap-3">
+                        <span class="inline-flex items-center gap-2"><i class="bi bi-phone" aria-hidden="true"></i><span>Split payment</span></span>
+                        <span class="text-xs font-semibold text-slate-500">Cash / Wave / Bank / APS</span>
+                    </summary>
+                    <form method="post" action="{% url 'mark_order_paid' order.id %}" class="border-t border-slate-200 p-4 space-y-3">
+                        {% csrf_token %}
+                        <div data-payment-form data-payment-total="{{ total }}" class="space-y-2">
+                            <div data-payment-status class="text-sm font-bold text-red-700">Remaining: {{ total|whole }}</div>
 
-                <form method="post" action="{% url 'print_receipt' order.id 'customer' %}">
-                    {% csrf_token %}
-                    <button type="submit" class="w-full rounded-xl border border-slate-950 bg-slate-950 text-white px-6 py-4 text-base font-extrabold hover:bg-black">
-                        <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-receipt" aria-hidden="true"></i><span>Print Customer Copy</span></span>
-                    </button>
-                </form>
+                            <div data-payment-toggle data-payment-targets="quick-cash-input"
+                                 class="border border-slate-200 rounded-lg p-3 cursor-pointer bg-white hover:bg-slate-50">
+                                <div class="flex items-center justify-between gap-3">
+                                    <strong>Cash</strong>
+                                    <span class="text-xs text-slate-500">Tap to enter</span>
+                                </div>
+                                <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                                       type="number" step="0.01" min="0" name="cash" id="quick-cash-input"
+                                       class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
+                                       placeholder="0">
+                            </div>
 
-                <form method="post" action="{% url 'print_profit_receipt' order.id %}">
-                    {% csrf_token %}
-                    <button type="submit" class="w-full rounded-xl border border-slate-200 bg-white text-slate-800 px-6 py-4 text-base font-extrabold hover:bg-slate-50">
-                        <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-graph-up" aria-hidden="true"></i><span>Print Profit Copy</span></span>
-                    </button>
-                </form>
+                            <div data-payment-toggle data-payment-targets="quick-bank-input quick-bank-name-input"
+                                 class="border border-slate-200 rounded-lg p-3 cursor-pointer bg-white hover:bg-slate-50">
+                                <div class="flex items-center justify-between gap-3">
+                                    <strong>Bank</strong>
+                                    <span class="text-xs text-slate-500">Amount + bank</span>
+                                </div>
+                                <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                                       type="number" step="0.01" min="0" name="bank" id="quick-bank-input"
+                                       class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
+                                       placeholder="0">
+                                <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                                       type="text" name="bank_name" maxlength="100" id="quick-bank-name-input"
+                                       class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
+                                       placeholder="Bank name">
+                            </div>
 
-                <button type="button" id="print-cancel" class="w-full rounded-xl border border-slate-200 bg-white text-slate-700 px-6 py-3 text-base font-extrabold hover:bg-slate-50">
+                            <div data-payment-toggle data-payment-targets="quick-wave-input"
+                                 class="border border-slate-200 rounded-lg p-3 cursor-pointer bg-white hover:bg-slate-50">
+                                <div class="flex items-center justify-between gap-3">
+                                    <strong>Wave</strong>
+                                    <span class="text-xs text-slate-500">Optional</span>
+                                </div>
+                                <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                                       type="number" step="0.01" min="0" name="wave" id="quick-wave-input"
+                                       class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
+                                       placeholder="0">
+                            </div>
+
+                            <div data-payment-toggle data-payment-targets="quick-aps-input"
+                                 class="border border-slate-200 rounded-lg p-3 cursor-pointer bg-white hover:bg-slate-50">
+                                <div class="flex items-center justify-between gap-3">
+                                    <strong>APS</strong>
+                                    <span class="text-xs text-slate-500">Optional</span>
+                                </div>
+                                <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
+                                       type="number" step="0.01" min="0" name="aps" id="quick-aps-input"
+                                       class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
+                                       placeholder="0">
+                            </div>
+                        </div>
+                        <button type="submit" data-payment-confirm disabled
+                                class="w-full rounded-xl border border-emerald-700 bg-emerald-700 text-white px-5 py-3 text-base font-extrabold hover:bg-emerald-800">
+                            <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-cash-coin" aria-hidden="true"></i><span>Confirm Payment</span></span>
+                        </button>
+                    </form>
+                </details>
+
+                <button type="button" id="print-cancel" class="w-full rounded-xl border border-slate-200 bg-white text-slate-700 px-5 py-3 text-base font-extrabold hover:bg-slate-50">
                     <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-x-circle" aria-hidden="true"></i><span>Cancel</span></span>
                 </button>
             </div>
@@ -809,22 +847,104 @@
             if (!modal) return;
             modal.classList.remove("hidden");
             modal.classList.add("flex");
+            document.body.style.overflow = "hidden";
         }
 
         function closeModal() {
             if (!modal) return;
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            document.body.style.overflow = "";
         }
 
         if (payBtn) payBtn.addEventListener("click", openModal);
         if (closeBtn) closeBtn.addEventListener("click", closeModal);
         if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
         if (modal) {
+            let lastTouchY = null;
+
             modal.addEventListener("click", function (e) {
                 if (e.target === modal) closeModal();
             });
+            modal.addEventListener("wheel", function (e) {
+                const body = document.getElementById("print-modal-body");
+                if (!body) return;
+                e.preventDefault();
+                body.scrollTop += e.deltaY;
+            }, { passive: false });
+            modal.addEventListener("touchstart", function (e) {
+                lastTouchY = e.touches && e.touches.length ? e.touches[0].clientY : null;
+            }, { passive: false });
+            modal.addEventListener("touchmove", function (e) {
+                const body = document.getElementById("print-modal-body");
+                if (!body || lastTouchY === null || !e.touches || !e.touches.length) return;
+                e.preventDefault();
+                const currentY = e.touches[0].clientY;
+                body.scrollTop += lastTouchY - currentY;
+                lastTouchY = currentY;
+            }, { passive: false });
         }
+    })();
+</script>
+
+<script>
+    (function () {
+        function money(value) {
+            const number = Number(value || 0);
+            if (!Number.isFinite(number)) return "0";
+            return Math.round(number).toString();
+        }
+
+        function amount(form, name) {
+            const input = form.querySelector('[name="' + name + '"]');
+            const value = input ? Number(input.value || 0) : 0;
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        function updatePaymentForm(form) {
+            const total = Number(form.dataset.paymentTotal || 0) || 0;
+            const status = form.querySelector("[data-payment-status]");
+            const submitForm = form.closest("form");
+            const confirm = submitForm ? submitForm.querySelector("[data-payment-confirm]") : null;
+            const paid = amount(form, "cash") + amount(form, "bank") + amount(form, "wave") + amount(form, "aps");
+            const remaining = total - paid;
+
+            if (!status || !confirm) return;
+
+            if (remaining > 0) {
+                status.textContent = "Remaining: " + money(remaining);
+                status.classList.remove("text-emerald-700");
+                status.classList.add("text-red-700");
+                confirm.disabled = true;
+                confirm.classList.add("opacity-50", "cursor-not-allowed");
+                return;
+            }
+
+            status.textContent = remaining < 0 ? "Change: " + money(Math.abs(remaining)) : "Paid in full";
+            status.classList.remove("text-red-700");
+            status.classList.add("text-emerald-700");
+            confirm.disabled = false;
+            confirm.classList.remove("opacity-50", "cursor-not-allowed");
+        }
+
+        document.addEventListener("click", function (event) {
+            const row = event.target.closest("[data-payment-toggle]");
+            if (!row) return;
+            const ids = (row.dataset.paymentTargets || "").split(/\s+/).filter(Boolean);
+            ids.forEach(function (id) {
+                const input = document.getElementById(id);
+                if (input) input.classList.remove("hidden");
+            });
+            const first = ids.map(function (id) { return document.getElementById(id); }).find(Boolean);
+            if (first) window.setTimeout(function () { first.focus(); first.select && first.select(); }, 0);
+        });
+
+        document.querySelectorAll("[data-payment-form]").forEach(function (form) {
+            form.querySelectorAll("input").forEach(function (input) {
+                input.addEventListener("input", function () { updatePaymentForm(form); });
+            });
+            updatePaymentForm(form);
+        });
     })();
 </script>
 

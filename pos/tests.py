@@ -704,6 +704,36 @@ class OrderDeleteTests(TestCase):
         self.assertFalse(Order.objects.filter(id=order.id).exists())
         self.assertFalse(Payment.objects.filter(order_id=order.id).exists())
 
+    def test_deleting_paid_order_restores_deducted_stock(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
+        order = Order.objects.create(order_number=20, status="unpaid", is_active=True, created_at=paid_at)
+        product = Product.objects.create(
+            code=20,
+            name="Cement",
+            cost_price=Decimal("50"),
+            selling_price=Decimal("80"),
+            stock_quantity=Decimal("10"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("3"),
+            selling_price=Decimal("80"),
+            cost_price_snapshot=Decimal("50"),
+        )
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("7.00"))
+
+        response = self.client.post(reverse("delete_order", args=[order.id]))
+
+        self.assertEqual(response.status_code, 302)
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("10.00"))
+        self.assertFalse(Order.objects.filter(id=order.id).exists())
+        self.assertFalse(StockMovement.objects.filter(product=product).exists())
+
     def test_delete_order_removes_related_print_jobs(self):
         order = Order.objects.create(order_number=3, status="unpaid")
         job = PrintJob.objects.create(

@@ -1,11 +1,12 @@
 from datetime import datetime
 from calendar import month_name
 from decimal import Decimal
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Q, Sum
+from django.db.models import F, Max, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -45,6 +46,14 @@ def _safe_next_url(request, fallback):
     if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return next_url
     return fallback
+
+
+def _is_ajax(request):
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _json_error(message, status=400):
+    return JsonResponse({"ok": False, "error": message}, status=status)
 
 
 def _order_product_quantities(order):
@@ -113,28 +122,110 @@ def _restore_order_stock(order, reason_prefix="Refund"):
     order.save(update_fields=["stock_deducted_at"])
 
 
-def _cash_wave_breakdown(orders):
-    cash = Decimal("0")
-    wave = Decimal("0")
+def _payment_breakdown(orders):
+    totals = {
+        "cash": Decimal("0"),
+        "wave": Decimal("0"),
+        "bank": Decimal("0"),
+        "aps": Decimal("0"),
+    }
     for order in orders:
         method_totals = {}
         for payment in order.payments.all():
             amount = Decimal(str(payment.amount_received or 0))
             if payment.method == "cash":
                 amount -= Decimal(str(payment.change_given or 0))
-                cash += amount
-            elif payment.method == "wave":
-                wave += amount
+            if payment.method in totals:
+                totals[payment.method] += amount
             method_totals[payment.method] = method_totals.get(payment.method, Decimal("0")) + amount
-        labels = []
-        if method_totals.get("cash"):
-            labels.append(f"Cash {method_totals['cash']}")
-        if method_totals.get("wave"):
-            labels.append(f"Wave {method_totals['wave']}")
+        labels = [
+            f"{label} {method_totals[value]}"
+            for value, label in Payment.PAYMENT_METHODS
+            if method_totals.get(value)
+        ]
         if not labels:
             labels = [payment.method.upper() for payment in order.payments.all()]
         order.payment_display = ", ".join(labels) if labels else "-"
-    return cash, wave
+    return totals
+
+
+def _decimal_from_post(request, name):
+    val = (request.POST.get(name) or "").strip()
+    if not val:
+        return Decimal("0")
+    return Decimal(val)
+
+
+def _parse_payments_from_post(request, total):
+    bank_name = (request.POST.get("bank_name") or "").strip()
+    has_split_fields = any(
+        key in request.POST
+        for key in ("cash", "bank", "wave", "aps")
+    )
+    payments_to_create = []
+    change = Decimal("0.00")
+
+    if has_split_fields:
+        cash_given = _decimal_from_post(request, "cash")
+        bank_amt = _decimal_from_post(request, "bank")
+        wave_amt = _decimal_from_post(request, "wave")
+        aps_amt = _decimal_from_post(request, "aps")
+
+        if cash_given < 0 or bank_amt < 0 or wave_amt < 0 or aps_amt < 0:
+            raise ValueError("Payment amounts must be 0 or more.")
+
+        non_cash = bank_amt + wave_amt + aps_amt
+        if non_cash > total:
+            raise ValueError("Non-cash payments exceed the order total.")
+        if bank_amt > 0 and not bank_name:
+            raise ValueError("Bank name is required for bank payments.")
+
+        cash_needed = total - non_cash
+        if cash_given < cash_needed:
+            raise ValueError("Total paid is less than the order total.")
+
+        change = cash_given - cash_needed
+        if bank_amt > 0:
+            payments_to_create.append(("bank", bank_amt, bank_name, Decimal("0.00")))
+        if wave_amt > 0:
+            payments_to_create.append(("wave", wave_amt, "", Decimal("0.00")))
+        if aps_amt > 0:
+            payments_to_create.append(("aps", aps_amt, "", Decimal("0.00")))
+        if cash_given > 0:
+            payments_to_create.append(("cash", cash_given, "", change))
+
+        if not payments_to_create:
+            raise ValueError("Enter at least one payment amount.")
+
+        return payments_to_create, "split", sum((p[1] for p in payments_to_create), Decimal("0")), change
+
+    method = (request.POST.get("method") or "cash").strip()
+    valid_methods = {choice[0] for choice in Payment.PAYMENT_METHODS}
+    if method not in valid_methods:
+        raise ValueError("Payment method must be valid.")
+
+    amount_raw = (request.POST.get("amount_received") or "").strip()
+    amount_received = Decimal(amount_raw) if amount_raw else total
+    if amount_received <= 0:
+        raise ValueError("Payment amount must be greater than 0.")
+
+    if method == "cash":
+        if amount_received < total:
+            raise ValueError("Cash amount is less than the order total.")
+        change = amount_received - total
+    else:
+        if amount_received != total:
+            raise ValueError(f"{method.upper()} amount must equal the order total.")
+        if method == "bank" and not bank_name:
+            raise ValueError("Bank name is required for bank payments.")
+
+    payments_to_create.append((
+        method,
+        amount_received,
+        bank_name if method == "bank" else "",
+        change if method == "cash" else Decimal("0.00"),
+    ))
+    return payments_to_create, method, amount_received, change
 
 
 def get_device_id(request):
@@ -249,6 +340,11 @@ def products_page(request):
     paginator = Paginator(products, 25)
     page_number = request.GET.get("page") or 1
     page_obj = paginator.get_page(page_number)
+    page_range = paginator.get_elided_page_range(
+        number=page_obj.number,
+        on_each_side=2,
+        on_ends=1,
+    )
 
     return render(
         request,
@@ -256,6 +352,7 @@ def products_page(request):
         {
             "products": page_obj,
             "page_obj": page_obj,
+            "page_range": page_range,
             "query": query,
             "next_product_code": _next_product_code(),
             "today": timezone.localdate(),
@@ -267,11 +364,13 @@ def stock_movements_page(request):
     product_id = (request.GET.get("product") or "").strip()
     movement_type = (request.GET.get("type") or "").strip()
     raw_date = (request.GET.get("date") or "").strip()
+    raw_year = (request.GET.get("year") or "").strip()
 
     movements = StockMovement.objects.select_related("product", "order").order_by("-occurred_at", "-id")
     selected_product = ""
     selected_type = ""
     selected_date = None
+    selected_year = None
 
     if product_id:
         try:
@@ -291,13 +390,72 @@ def stock_movements_page(request):
             movements = movements.filter(occurred_at__date=selected_date)
         except Exception:
             selected_date = None
+    elif raw_year:
+        try:
+            selected_year = int(raw_year)
+            if selected_year < 2000 or selected_year > 9999:
+                raise ValueError()
+            movements = movements.filter(occurred_at__year=selected_year)
+        except Exception:
+            selected_year = None
 
-    total_in = movements.filter(quantity_delta__gt=0).aggregate(total=Sum("quantity_delta"))["total"] or Decimal("0")
-    total_out = movements.filter(quantity_delta__lt=0).aggregate(total=Sum("quantity_delta"))["total"] or Decimal("0")
+    total_stocked = (
+        movements.filter(movement_type__in=[StockMovement.TYPE_RESTOCK, StockMovement.TYPE_ADJUSTMENT])
+        .aggregate(total=Sum("quantity_delta"))["total"]
+        or Decimal("0")
+    )
+    total_sold_delta = (
+        movements.filter(movement_type=StockMovement.TYPE_SALE)
+        .aggregate(total=Sum("quantity_delta"))["total"]
+        or Decimal("0")
+    )
+    total_sold = -total_sold_delta
+    summary_products = Product.objects.all().order_by(*_product_code_ordering())
+    if selected_product:
+        summary_products = summary_products.filter(id=selected_product)
+    summary_rows = []
+    summary_filter = Q()
+    if selected_date:
+        summary_filter &= Q(stock_movements__occurred_at__date=selected_date)
+    elif selected_year:
+        summary_filter &= Q(stock_movements__occurred_at__year=selected_year)
+
+    for product in summary_products.annotate(
+        stocked_total=Sum(
+            "stock_movements__quantity_delta",
+            filter=summary_filter
+            & Q(
+                stock_movements__movement_type__in=[
+                    StockMovement.TYPE_RESTOCK,
+                    StockMovement.TYPE_ADJUSTMENT,
+                ]
+            ),
+        ),
+        sold_delta_total=Sum(
+            "stock_movements__quantity_delta",
+            filter=summary_filter & Q(stock_movements__movement_type=StockMovement.TYPE_SALE),
+        ),
+    ):
+        stocked_total = product.stocked_total or Decimal("0")
+        sold_total = -(product.sold_delta_total or Decimal("0"))
+        if stocked_total or sold_total or product.stock_quantity:
+            summary_rows.append(
+                {
+                    "product": product,
+                    "stocked_total": stocked_total,
+                    "sold_total": sold_total,
+                    "remaining": product.stock_quantity,
+                }
+            )
 
     paginator = Paginator(movements, 30)
     page_number = request.GET.get("page") or 1
     page_obj = paginator.get_page(page_number)
+    page_range = paginator.get_elided_page_range(
+        number=page_obj.number,
+        on_each_side=2,
+        on_ends=1,
+    )
 
     return render(
         request,
@@ -305,14 +463,59 @@ def stock_movements_page(request):
         {
             "movements": page_obj,
             "page_obj": page_obj,
+            "page_range": page_range,
             "products": Product.objects.all().order_by(*_product_code_ordering()),
             "movement_type_choices": StockMovement.TYPE_CHOICES,
             "selected_product": selected_product,
             "selected_type": selected_type,
             "selected_date_value": selected_date.strftime("%Y-%m-%d") if selected_date else "",
+            "selected_year": selected_year or "",
             "total_movement_count": paginator.count,
-            "total_in": total_in,
-            "total_out": total_out,
+            "total_stocked": total_stocked,
+            "total_sold": total_sold,
+            "total_in": total_stocked,
+            "total_out": -total_sold,
+            "summary_rows": summary_rows,
+        },
+    )
+
+
+def stock_alerts_page(request):
+    query = (request.GET.get("q") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+
+    products = Product.objects.all().order_by("stock_quantity", *_product_code_ordering())
+    if query:
+        if query.isdigit():
+            products = products.filter(code=int(query))
+        else:
+            products = products.filter(name__icontains=query)
+
+    out_of_stock_count = products.filter(stock_quantity__lte=0).count()
+    low_stock_count = products.filter(stock_quantity__gt=0, stock_quantity__lte=F("low_stock_threshold")).count()
+
+    if status == "out":
+        products = products.filter(stock_quantity__lte=0)
+    elif status == "low":
+        products = products.filter(stock_quantity__gt=0, stock_quantity__lte=F("low_stock_threshold"))
+    else:
+        status = ""
+        products = products.filter(Q(stock_quantity__lte=0) | Q(stock_quantity__lte=F("low_stock_threshold")))
+
+    paginator = Paginator(products, 30)
+    page_number = request.GET.get("page") or 1
+    page_obj = paginator.get_page(page_number)
+
+    return render(
+        request,
+        "pos/stock_alerts.html",
+        {
+            "products": page_obj,
+            "page_obj": page_obj,
+            "query": query,
+            "selected_status": status,
+            "low_stock_count": low_stock_count,
+            "out_of_stock_count": out_of_stock_count,
         },
     )
 
@@ -370,6 +573,11 @@ def view_order(request, order_id):
 
 def edit_product(request, product_id):
     product = get_object_or_404(Product, id=product_id)
+    fallback_url = reverse("products")
+    next_url = (request.POST.get("next") or request.GET.get("next") or "").strip()
+    if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        next_url = fallback_url
+    edit_url = f"{reverse('edit_product', args=[product.id])}?next={quote(next_url, safe='')}"
 
     if request.method == "POST":
         code_raw = (request.POST.get("code") or "").strip()
@@ -386,11 +594,11 @@ def edit_product(request, product_id):
                     raise ValueError()
             except Exception:
                 messages.error(request, "Product code must be a valid number (0 or more).")
-                return redirect("edit_product", product_id=product.id)
+                return redirect(edit_url)
 
         if not name:
             messages.error(request, "Name is required.")
-            return redirect("edit_product", product_id=product.id)
+            return redirect(edit_url)
 
         try:
             cost_price = Decimal(cost_price)
@@ -398,7 +606,7 @@ def edit_product(request, product_id):
                 raise ValueError()
         except Exception:
             messages.error(request, "Cost price must be a valid number (0 or more).")
-            return redirect("edit_product", product_id=product.id)
+            return redirect(edit_url)
 
         try:
             selling_price = Decimal(selling_price) if selling_price != "" else Decimal("0")
@@ -406,7 +614,7 @@ def edit_product(request, product_id):
                 raise ValueError()
         except Exception:
             messages.error(request, "Selling price must be a valid number (greater than 0).")
-            return redirect("edit_product", product_id=product.id)
+            return redirect(edit_url)
 
         try:
             low_stock_threshold = (
@@ -416,7 +624,7 @@ def edit_product(request, product_id):
                 raise ValueError()
         except Exception:
             messages.error(request, "Low stock threshold must be a valid number (0 or more).")
-            return redirect("edit_product", product_id=product.id)
+            return redirect(edit_url)
 
         product.code = code
         product.name = name
@@ -427,10 +635,10 @@ def edit_product(request, product_id):
             product.save()
         except IntegrityError:
             messages.error(request, "That product name or code is already in use.")
-            return redirect("edit_product", product_id=product.id)
+            return redirect(edit_url)
 
         messages.success(request, f"Updated product: {product.name}")
-        return redirect("products")
+        return redirect(next_url)
 
     return render(
         request,
@@ -438,6 +646,7 @@ def edit_product(request, product_id):
         {
             "product": product,
             "next_product_code": _next_product_code(),
+            "next_url": next_url,
         },
     )
 
@@ -446,11 +655,16 @@ def delete_product(request, product_id):
     if request.method != "POST":
         return redirect("products")
 
+    next_url = _safe_next_url(request, reverse("products"))
     product = get_object_or_404(Product, id=product_id)
     product_name = product.name
+    product_id = product.id
     product.delete()
+    if _is_ajax(request):
+        return JsonResponse({"ok": True, "product_id": product_id, "message": f"Deleted product: {product_name}"})
+
     messages.success(request, f"Deleted product: {product_name}")
-    return redirect("products")
+    return redirect(next_url)
 
 
 def adjust_product_stock(request, product_id):
@@ -467,20 +681,28 @@ def adjust_product_stock(request, product_id):
     try:
         quantity = Decimal(quantity_raw)
     except Exception:
+        if _is_ajax(request):
+            return _json_error("Stock quantity must be a valid number.")
         messages.error(request, "Stock quantity must be a valid number.")
         return redirect(next_url)
 
     if quantity <= 0:
+        if _is_ajax(request):
+            return _json_error("Stock quantity must be greater than 0.")
         messages.error(request, "Stock quantity must be greater than 0.")
         return redirect(next_url)
 
     if adjustment_type not in {"restock", "reduce"}:
+        if _is_ajax(request):
+            return _json_error("Stock movement type is required.")
         messages.error(request, "Stock movement type is required.")
         return redirect(next_url)
 
     try:
         occurred_date = datetime.strptime(occurred_at_raw, "%Y-%m-%d").date() if occurred_at_raw else timezone.localdate()
     except Exception:
+        if _is_ajax(request):
+            return _json_error("Stock movement date must be valid.")
         messages.error(request, "Stock movement date must be valid.")
         return redirect(next_url)
 
@@ -490,6 +712,10 @@ def adjust_product_stock(request, product_id):
         product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
         delta = quantity if adjustment_type == "restock" else -quantity
         if product.stock_quantity + delta < 0:
+            if _is_ajax(request):
+                return _json_error(
+                    f"Cannot reduce {product.name} by {quantity}; only {product.stock_quantity} in stock."
+                )
             messages.error(
                 request,
                 f"Cannot reduce {product.name} by {quantity}; only {product.stock_quantity} in stock.",
@@ -511,6 +737,17 @@ def adjust_product_stock(request, product_id):
             occurred_at=occurred_at,
         )
 
+    if _is_ajax(request):
+        return JsonResponse(
+            {
+                "ok": True,
+                "product_id": product.id,
+                "stock_quantity": str(product.stock_quantity),
+                "stock_status": product.stock_status(),
+                "message": f"Updated stock for {product.name}.",
+            }
+        )
+
     messages.success(request, f"Updated stock for {product.name}.")
     return redirect(next_url)
 
@@ -519,6 +756,7 @@ def expenses_page(request):
     raw_date = (request.GET.get("date") or "").strip()
     raw_month = (request.GET.get("month") or "").strip()
     category = (request.GET.get("category") or "").strip()
+    payment_method = (request.GET.get("payment_method") or "").strip()
 
     expenses = Expense.objects.all()
     selected_date = None
@@ -544,6 +782,12 @@ def expenses_page(request):
     else:
         category = ""
 
+    valid_payment_methods = {choice[0] for choice in Expense.PAYMENT_METHODS}
+    if payment_method in valid_payment_methods:
+        expenses = expenses.filter(payment_method=payment_method)
+    else:
+        payment_method = ""
+
     total_expenses = _sum_expenses(expenses)
     paginator = Paginator(expenses, 25)
     page_number = request.GET.get("page") or 1
@@ -556,10 +800,12 @@ def expenses_page(request):
             "expenses": page_obj,
             "page_obj": page_obj,
             "category_choices": Expense.CATEGORY_CHOICES,
+            "payment_method_choices": Expense.PAYMENT_METHODS,
             "selected_date": selected_date,
             "selected_date_value": selected_date.strftime("%Y-%m-%d") if selected_date else "",
             "selected_month_value": selected_month_value,
             "selected_category": category,
+            "selected_payment_method": payment_method,
             "total_expenses": total_expenses,
             "today": timezone.localdate(),
         },
@@ -574,6 +820,8 @@ def create_expense(request):
     category = (request.POST.get("category") or "").strip()
     description = (request.POST.get("description") or "").strip()
     amount_raw = (request.POST.get("amount") or "").strip()
+    payment_method = (request.POST.get("payment_method") or "").strip()
+    bank_name = (request.POST.get("bank_name") or "").strip()
     notes = (request.POST.get("notes") or "").strip()
 
     next_url = request.POST.get("next")
@@ -588,6 +836,12 @@ def create_expense(request):
 
     if category not in {choice[0] for choice in Expense.CATEGORY_CHOICES}:
         messages.error(request, "Expense category must be valid.")
+        return redirect(next_url)
+    if payment_method not in {choice[0] for choice in Expense.PAYMENT_METHODS}:
+        messages.error(request, "Expense payment method must be valid.")
+        return redirect(next_url)
+    if payment_method == Expense.PAYMENT_BANK and not bank_name:
+        messages.error(request, "Bank name is required for bank expenses.")
         return redirect(next_url)
 
     try:
@@ -608,6 +862,8 @@ def create_expense(request):
         category=category,
         description=description[:255],
         amount=amount,
+        payment_method=payment_method,
+        bank_name=bank_name[:100] if payment_method == Expense.PAYMENT_BANK else "",
         notes=notes,
     )
     messages.success(request, f"Added expense: {description[:60]}")
@@ -646,9 +902,14 @@ def create_product(request):
         if not next_url or not url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
             next_url = "/products/"
 
-    if not name or not cost_price or selling_price == "":
-        messages.error(request, "Name, cost price, and selling price are required.")
+    def fail(message):
+        if _is_ajax(request):
+            return _json_error(message)
+        messages.error(request, message)
         return redirect(next_url)
+
+    if not name or not cost_price or selling_price == "":
+        return fail("Name, cost price, and selling price are required.")
 
     code = None
     if code_raw != "":
@@ -657,40 +918,35 @@ def create_product(request):
             if code < 0:
                 raise ValueError()
         except Exception:
-            messages.error(request, "Product code must be a valid number (0 or more).")
-            return redirect(next_url)
+            return fail("Product code must be a valid number (0 or more).")
 
     try:
         cost_price = Decimal(cost_price)
         if cost_price < 0:
             raise ValueError()
     except Exception:
-        messages.error(request, "Cost price must be a valid number (0 or more).")
-        return redirect(next_url)
+        return fail("Cost price must be a valid number (0 or more).")
 
     try:
         selling_price = Decimal(selling_price)
         if selling_price <= 0:
             raise ValueError()
     except Exception:
-        messages.error(request, "Selling price must be a valid number (greater than 0).")
-        return redirect(next_url)
+        return fail("Selling price must be a valid number (greater than 0).")
 
     try:
         stock_quantity = Decimal(stock_quantity_raw) if stock_quantity_raw else Decimal("0")
         if stock_quantity < 0:
             raise ValueError()
     except Exception:
-        messages.error(request, "Opening stock must be a valid number (0 or more).")
-        return redirect(next_url)
+        return fail("Opening stock must be a valid number (0 or more).")
 
     try:
         low_stock_threshold = Decimal(low_stock_threshold_raw) if low_stock_threshold_raw else Decimal("5")
         if low_stock_threshold < 0:
             raise ValueError()
     except Exception:
-        messages.error(request, "Low stock threshold must be a valid number (0 or more).")
-        return redirect(next_url)
+        return fail("Low stock threshold must be a valid number (0 or more).")
 
     try:
         product = Product.objects.create(
@@ -709,8 +965,17 @@ def create_product(request):
                 reason="Opening stock",
             )
     except IntegrityError:
-        messages.error(request, "That product name or code is already in use.")
-        return redirect(next_url)
+        return fail("That product name or code is already in use.")
+
+    if _is_ajax(request):
+        return JsonResponse(
+            {
+                "ok": True,
+                "product_id": product.id,
+                "message": f"Added product: {name}",
+                "next_product_code": _next_product_code(),
+            }
+        )
 
     messages.success(request, f"Added product: {name}")
     return redirect(next_url)
@@ -868,6 +1133,7 @@ def delete_order(request, order_id):
         order_number = order.order_number
         if order.status == "paid":
             _restore_order_stock(order, reason_prefix="Deleted paid")
+            StockMovement.objects.filter(order=order).delete()
 
         Payment.objects.filter(order=order).delete()
         PrintJob.objects.filter(payload__order_id=order.id).delete()
@@ -982,73 +1248,8 @@ def pay_order(request, order_id):
     change = Decimal("0.00")
 
     if request.method == "POST":
-        bank_name = request.POST.get("bank_name", "").strip()
-
-        def _d(name):
-            val = (request.POST.get(name) or "").strip()
-            if not val:
-                return Decimal("0")
-            return Decimal(val)
-
-        split_cash = request.POST.get("cash") is not None
-        split_bank = request.POST.get("bank") is not None
-        split_wave = request.POST.get("wave") is not None
-        split_aps = request.POST.get("aps") is not None
-        using_split = split_cash or split_bank or split_wave or split_aps
-
-        payments_to_create = []
-        method = None
-        amount_received = None
-
         try:
-            if using_split:
-                cash_given = _d("cash")
-                bank_amt = _d("bank")
-                wave_amt = _d("wave")
-                aps_amt = _d("aps")
-
-                if cash_given < 0 or bank_amt < 0 or wave_amt < 0 or aps_amt < 0:
-                    raise ValueError("Amounts must be 0 or more.")
-
-                non_cash = bank_amt + wave_amt + aps_amt
-                if non_cash > total:
-                    raise ValueError("Non-cash exceeds total.")
-                if bank_amt > 0 and not bank_name:
-                    raise ValueError("Bank name is required for bank transfers.")
-
-                cash_needed = total - non_cash
-                if cash_given < cash_needed:
-                    raise ValueError("Total paid is LESS than total.")
-
-                change = cash_given - cash_needed
-
-                if bank_amt > 0:
-                    payments_to_create.append(("bank", bank_amt, bank_name))
-                if wave_amt > 0:
-                    payments_to_create.append(("wave", wave_amt, None))
-                if aps_amt > 0:
-                    payments_to_create.append(("aps", aps_amt, None))
-                if cash_given > 0:
-                    payments_to_create.append(("cash", cash_given, None))
-
-                amount_received = non_cash + cash_given
-                method = "split"
-            else:
-                method = request.POST.get("method")
-                amount_received = Decimal((request.POST.get("amount_received") or "").strip())
-
-                if method == "cash":
-                    if amount_received < total:
-                        raise ValueError("Amount received is LESS than total.")
-                    change = amount_received - total
-                    payments_to_create.append(("cash", amount_received, None))
-                else:
-                    if amount_received != total:
-                        raise ValueError("For non-cash payments, amount must equal total.")
-                    if method == "bank" and not bank_name:
-                        raise ValueError("Bank name is required for bank transfers.")
-                    payments_to_create.append((method, amount_received, bank_name if method == "bank" else None))
-                    change = Decimal("0.00")
+            payments_to_create, method, amount_received, change = _parse_payments_from_post(request, total)
         except Exception as e:
             error = str(e) if str(e) else "Invalid amount entered."
 
@@ -1056,13 +1257,13 @@ def pay_order(request, order_id):
             try:
                 with transaction.atomic():
                     order = Order.objects.select_for_update().get(id=order.id)
-                    for pay_method, pay_amount, pay_bank in payments_to_create:
+                    for pay_method, pay_amount, pay_bank, pay_change in payments_to_create:
                         Payment.objects.create(
                             order=order,
                             method=pay_method,
                             bank_name=pay_bank,
                             amount_received=pay_amount,
-                            change_given=change if pay_method == "cash" else Decimal("0.00"),
+                            change_given=pay_change,
                         )
 
                     order.status = "paid"
@@ -1132,29 +1333,10 @@ def mark_order_paid(request, order_id):
         messages.error(request, "Add at least one item before marking the order as paid.")
         return redirect("pos_order", order_id=order_id)
 
-    method = (request.POST.get("method") or "cash").strip()
-    valid_methods = {choice[0] for choice in Payment.PAYMENT_METHODS}
-    if method not in valid_methods:
-        messages.error(request, "Payment method must be valid.")
-        return redirect("pos_order", order_id=order_id)
-
-    bank_name = (request.POST.get("bank_name") or "").strip()
-    if method == "bank" and not bank_name:
-        messages.error(request, "Bank name is required for bank transfers.")
-        return redirect("pos_order", order_id=order_id)
-
-    amount_raw = (request.POST.get("amount_received") or "").strip()
     try:
-        amount_received = Decimal(amount_raw) if amount_raw else total
-    except Exception:
-        messages.error(request, "Payment amount must be a valid number.")
-        return redirect("pos_order", order_id=order_id)
-
-    if method != "cash" and amount_received != total:
-        messages.error(request, f"{method.upper()} amount must equal the order total.")
-        return redirect("pos_order", order_id=order_id)
-    if method == "cash" and amount_received < total:
-        messages.error(request, "Cash amount is less than the order total.")
+        payments_to_create, method, amount_received, change = _parse_payments_from_post(request, total)
+    except Exception as e:
+        messages.error(request, str(e) if str(e) else "Invalid payment entered.")
         return redirect("pos_order", order_id=order_id)
 
     with transaction.atomic():
@@ -1162,13 +1344,14 @@ def mark_order_paid(request, order_id):
         if order.status != "unpaid":
             return redirect("pos_home")
 
-        Payment.objects.create(
-            order=order,
-            method=method,
-            bank_name=bank_name if method == "bank" else None,
-            amount_received=amount_received,
-            change_given=amount_received - total if method == "cash" else Decimal("0.00"),
-        )
+        for pay_method, pay_amount, pay_bank, pay_change in payments_to_create:
+            Payment.objects.create(
+                order=order,
+                method=pay_method,
+                bank_name=pay_bank,
+                amount_received=pay_amount,
+                change_given=pay_change,
+            )
         order.status = "paid"
         order.is_active = False
         order.save()
@@ -1276,7 +1459,7 @@ def day_view(request):
 
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
-    total_cash, total_wave = _cash_wave_breakdown(orders_qs)
+    payment_totals = _payment_breakdown(orders_qs)
     expenses_qs = Expense.objects.filter(date=selected).order_by("-created_at", "-id")
     total_expenses = _sum_expenses(expenses_qs)
     net_profit = total_profit - total_expenses
@@ -1294,8 +1477,10 @@ def day_view(request):
             "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
-            "total_cash": total_cash,
-            "total_wave": total_wave,
+            "total_cash": payment_totals["cash"],
+            "total_wave": payment_totals["wave"],
+            "total_bank": payment_totals["bank"],
+            "total_aps": payment_totals["aps"],
             "expenses": expenses_qs,
             "total_expenses": total_expenses,
             "net_profit": net_profit,
@@ -1332,7 +1517,7 @@ def month_view(request):
 
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
-    total_cash, total_wave = _cash_wave_breakdown(orders_qs)
+    payment_totals = _payment_breakdown(orders_qs)
     expenses_qs = Expense.objects.filter(date__year=selected_year, date__month=selected_month)
     total_expenses = _sum_expenses(expenses_qs)
     net_profit = total_profit - total_expenses
@@ -1353,8 +1538,10 @@ def month_view(request):
             "total_order_count": paginator.count,
             "total_sales": total_sales,
             "total_profit": total_profit,
-            "total_cash": total_cash,
-            "total_wave": total_wave,
+            "total_cash": payment_totals["cash"],
+            "total_wave": payment_totals["wave"],
+            "total_bank": payment_totals["bank"],
+            "total_aps": payment_totals["aps"],
             "total_expenses": total_expenses,
             "net_profit": net_profit,
         },
