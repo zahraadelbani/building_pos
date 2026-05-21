@@ -7,7 +7,7 @@
         <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
             <div>
                 <h1 class="text-2xl font-bold">Reprint</h1>
-                <p class="text-sm text-slate-500">Find a paid order and print customer/profit copies.</p>
+                <p class="text-sm text-slate-500">Find an order from any day to view, print, or refund.</p>
             </div>
             <a href="{% url 'pos_home' %}"
                class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
@@ -35,6 +35,8 @@
                             <th class="p-3 text-left">Date</th>
                             <th class="p-3 text-left">Status</th>
                             <th class="p-3 text-right">Total</th>
+                            <th class="p-3 text-right">Net</th>
+                            <th class="p-3 text-center">Refund</th>
                             <th class="p-3 text-center">Actions</th>
                         </tr>
                     </thead>
@@ -46,11 +48,27 @@
                             <td class="p-3">
                                 {% if o.status == 'refunded' %}
                                     <span class="px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">REFUNDED</span>
+                                {% elif o.refunded_total %}
+                                    <span class="px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">PARTIAL</span>
                                 {% else %}
                                     <span class="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">PAID</span>
                                 {% endif %}
                             </td>
                             <td class="p-3 text-right font-semibold text-slate-900">{{ o.total_amount|whole }}</td>
+                            <td class="p-3 text-right font-semibold text-emerald-700">{{ o.net_total|whole }}</td>
+                            <td class="p-3 text-center">
+                                {% if o.status == 'refunded' %}
+                                    <span class="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm font-extrabold">
+                                        Done
+                                    </span>
+                                {% else %}
+                                    <a href="{% url 'refund_order' o.id %}"
+                                       class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-extrabold"
+                                       style="background:#991b1b;color:#ffffff;border:1px solid #7f1d1d;min-width:92px;box-shadow:none;text-decoration:none;">
+                                        <span>Refund</span>
+                                    </a>
+                                {% endif %}
+                            </td>
                             <td class="p-3">
                                 {% if o.status == 'refunded' %}
                                     <div class="flex flex-wrap justify-center gap-2">
@@ -100,7 +118,7 @@
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="5" class="p-10 text-center text-slate-400">
+                            <td colspan="7" class="p-10 text-center text-slate-400">
                                 No paid orders found.
                             </td>
                         </tr>

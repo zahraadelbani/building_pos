@@ -1,6 +1,6 @@
 from datetime import datetime
 from calendar import month_name
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import quote
 
 from django.contrib import messages
@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, StockMovement
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, Refund, RefundItem, StockMovement
 from .printing import (
     enqueue_day_summary,
     enqueue_month_summary,
@@ -63,6 +63,64 @@ def _order_product_quantities(order):
     return quantities
 
 
+def _money(value):
+    return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _order_refund_scale(order):
+    subtotal = Decimal(str(order.subtotal_amount()))
+    if subtotal <= 0:
+        return Decimal("1")
+    return Decimal(str(order.total_amount())) / subtotal
+
+
+def _refund_amount_for(order, gross_amount):
+    return _money(Decimal(str(gross_amount)) * _order_refund_scale(order))
+
+
+def _refund_profit_for(order, gross_profit):
+    return _money(Decimal(str(gross_profit)) * _order_refund_scale(order))
+
+
+def _attach_refund_state(order):
+    refunded_amount = Decimal(str(order.refunded_amount()))
+    order.refunded_total = refunded_amount
+    order.net_total = order.net_amount()
+    order.refund_display = order.refund_status_label()
+    return order
+
+
+def _refund_context_items(order):
+    items = []
+    for item in order.items.select_related("product").order_by("id"):
+        refunded_quantity = Decimal(str(item.refunded_quantity()))
+        refundable_quantity = Decimal(str(item.quantity)) - refunded_quantity
+        if refundable_quantity < 0:
+            refundable_quantity = Decimal("0")
+        refund_unit_amount = _refund_amount_for(order, item.selling_price)
+        item.refunded_quantity_value = refunded_quantity
+        item.refundable_quantity_value = refundable_quantity
+        item.refund_unit_amount = refund_unit_amount
+        item.refundable_amount = _money(refundable_quantity * refund_unit_amount)
+        items.append(item)
+    return items
+
+
+def _refunds_payment_breakdown(refunds):
+    totals = {value: Decimal("0") for value, _label in Payment.PAYMENT_METHODS}
+    for refund in refunds:
+        if refund.method in totals:
+            totals[refund.method] += Decimal(str(refund.amount or 0))
+    return totals
+
+
+def _net_payment_totals(payment_totals, refund_totals):
+    return {
+        key: payment_totals.get(key, Decimal("0")) - refund_totals.get(key, Decimal("0"))
+        for key, _label in Payment.PAYMENT_METHODS
+    }
+
+
 def _deduct_order_stock(order):
     if order.stock_deducted_at:
         return
@@ -99,7 +157,11 @@ def _restore_order_stock(order, reason_prefix="Refund"):
     if not order.stock_deducted_at:
         return
 
-    quantities = _order_product_quantities(order)
+    quantities = {}
+    for item in order.items.exclude(product__isnull=True).select_related("product"):
+        quantity = Decimal(str(item.refundable_quantity()))
+        if quantity > 0:
+            quantities[item.product_id] = quantities.get(item.product_id, Decimal("0")) + quantity
     products = {
         product.id: product
         for product in Product.objects.select_for_update().filter(id__in=quantities.keys())
@@ -530,13 +592,15 @@ def product_barcode(request, product_id):
 
 def reprint_orders(request):
     query = (request.GET.get("q") or "").strip()
-    orders = Order.objects.exclude(status="unpaid").order_by("-order_number")
+    orders = Order.objects.exclude(status="unpaid").prefetch_related("refunds").order_by("-order_number")
     if query:
         orders = orders.filter(order_number__icontains=query)
 
     paginator = Paginator(orders, 25)
     page_number = request.GET.get("page") or 1
     page_obj = paginator.get_page(page_number)
+    for order in page_obj:
+        _attach_refund_state(order)
 
     return render(
         request,
@@ -551,9 +615,16 @@ def reprint_orders(request):
 
 def view_order(request, order_id):
     order = get_object_or_404(
-        Order.objects.exclude(status="unpaid").prefetch_related("items", "payments"),
+        Order.objects.exclude(status="unpaid").prefetch_related(
+            "items",
+            "items__refund_items",
+            "payments",
+            "refunds",
+            "refunds__items",
+        ),
         id=order_id,
     )
+    _attach_refund_state(order)
     back_url = request.GET.get("next") or ""
     if not back_url or not url_has_allowed_host_and_scheme(back_url, allowed_hosts={request.get_host()}):
         back_url = None
@@ -565,7 +636,10 @@ def view_order(request, order_id):
             "order": order,
             "items": order.items.all(),
             "payments": order.payments.all().order_by("paid_at"),
+            "refunds": order.refunds.all().prefetch_related("items"),
             "total": order.total_amount(),
+            "refunded_total": order.refunded_total,
+            "net_total": order.net_total,
             "back_url": back_url,
         },
     )
@@ -1135,6 +1209,7 @@ def delete_order(request, order_id):
             _restore_order_stock(order, reason_prefix="Deleted paid")
             StockMovement.objects.filter(order=order).delete()
 
+        Refund.objects.filter(order=order).delete()
         Payment.objects.filter(order=order).delete()
         PrintJob.objects.filter(payload__order_id=order.id).delete()
         order.delete()
@@ -1357,7 +1432,15 @@ def mark_order_paid(request, order_id):
         order.save()
         _deduct_order_stock(order)
 
-    messages.success(request, f"Order #{order.order_number} marked as paid by {method.upper()}.")
+    device_id = get_device_id(request)
+    if device_id:
+        enqueue_sale_receipt(order=order, target_device_id=device_id)
+        messages.success(request, f"Order #{order.order_number} marked as paid by {method.upper()}. Receipt sent to printer.")
+    else:
+        messages.error(
+            request,
+            f"Order #{order.order_number} marked as paid, but receipt was NOT printed because Device ID is not set.",
+        )
     return redirect("pos_home")
 
 
@@ -1404,23 +1487,146 @@ def print_profit_receipt(request, order_id):
 
 
 def refund_order(request, order_id):
-    order = get_object_or_404(Order, id=order_id)
+    order = get_object_or_404(
+        Order.objects.prefetch_related("items", "items__refund_items", "refunds"),
+        id=order_id,
+    )
 
-    if order.status != "paid":
+    if order.status not in {"paid", "refunded"} or order.net_amount() <= 0:
         return redirect("pos_home")
 
     if request.method == "POST":
-        with transaction.atomic():
-            order = Order.objects.select_for_update().get(id=order.id)
-            _restore_order_stock(order, reason_prefix="Refund")
+        method = (request.POST.get("method") or "cash").strip()
+        bank_name = (request.POST.get("bank_name") or "").strip()
+        note = (request.POST.get("note") or "").strip()
+        valid_methods = {choice[0] for choice in Payment.PAYMENT_METHODS}
+        if method not in valid_methods:
+            messages.error(request, "Refund method must be valid.")
+            return redirect("refund_order", order_id=order.id)
+        if method == "bank" and not bank_name:
+            messages.error(request, "Bank name is required for bank refunds.")
+            return redirect("refund_order", order_id=order.id)
 
-            order.status = "refunded"
-            order.is_active = False
-            order.save()
+        refund = None
+        try:
+            with transaction.atomic():
+                order = Order.objects.select_for_update().get(id=order.id)
+                order_items = list(
+                    OrderItem.objects.select_for_update()
+                    .select_related("product")
+                    .filter(order=order)
+                    .order_by("id")
+                )
+                has_quantity_fields = any(f"quantity_{item.id}" in request.POST for item in order_items)
+                selected_items = []
+
+                for item in order_items:
+                    raw_quantity = (request.POST.get(f"quantity_{item.id}") or "").strip()
+                    if not has_quantity_fields:
+                        quantity = Decimal(str(item.refundable_quantity()))
+                    elif raw_quantity:
+                        quantity = Decimal(raw_quantity)
+                    else:
+                        quantity = Decimal("0")
+
+                    if quantity < 0:
+                        raise ValueError("Refund quantities cannot be negative.")
+                    if quantity == 0:
+                        continue
+
+                    refundable_quantity = Decimal(str(item.refundable_quantity()))
+                    if quantity > refundable_quantity:
+                        raise ValueError(f"{item.item_name} can only refund {refundable_quantity}.")
+
+                    gross_amount = Decimal(str(item.selling_price)) * quantity
+                    gross_profit = (Decimal(str(item.selling_price)) - Decimal(str(item.cost_price_snapshot))) * quantity
+                    selected_items.append(
+                        {
+                            "item": item,
+                            "quantity": quantity,
+                            "amount": _refund_amount_for(order, gross_amount),
+                            "profit_amount": _refund_profit_for(order, gross_profit),
+                        }
+                    )
+
+                if not selected_items:
+                    raise ValueError("Choose at least one item quantity to refund.")
+
+                refund_total = sum((row["amount"] for row in selected_items), Decimal("0"))
+                remaining_total = Decimal(str(order.total_amount())) - Decimal(str(order.refunded_amount()))
+                remaining_after_refund = {}
+                for item in order_items:
+                    selected_quantity = sum(
+                        (row["quantity"] for row in selected_items if row["item"].id == item.id),
+                        Decimal("0"),
+                    )
+                    remaining_after_refund[item.id] = Decimal(str(item.refundable_quantity())) - selected_quantity
+                is_final_refund = all(quantity <= 0 for quantity in remaining_after_refund.values())
+                if is_final_refund and selected_items:
+                    difference = _money(remaining_total - refund_total)
+                    selected_items[-1]["amount"] = _money(selected_items[-1]["amount"] + difference)
+                    refund_total = _money(remaining_total)
+                if refund_total > remaining_total:
+                    refund_total = _money(remaining_total)
+                if refund_total <= 0:
+                    raise ValueError("This order has no refundable balance left.")
+
+                refund_profit = sum((row["profit_amount"] for row in selected_items), Decimal("0"))
+                if is_final_refund:
+                    remaining_profit = Decimal(str(order.total_profit())) - Decimal(str(order.refunded_profit()))
+                    profit_difference = _money(remaining_profit - refund_profit)
+                    selected_items[-1]["profit_amount"] = _money(selected_items[-1]["profit_amount"] + profit_difference)
+                    refund_profit = _money(remaining_profit)
+                refund = Refund.objects.create(
+                    order=order,
+                    method=method,
+                    bank_name=bank_name if method == "bank" else "",
+                    amount=refund_total,
+                    profit_amount=refund_profit,
+                    note=note,
+                )
+
+                for row in selected_items:
+                    item = row["item"]
+                    RefundItem.objects.create(
+                        refund=refund,
+                        order_item=item,
+                        product=item.product,
+                        item_name=item.item_name,
+                        box=item.box,
+                        quantity=row["quantity"],
+                        selling_price=item.selling_price,
+                        cost_price_snapshot=item.cost_price_snapshot,
+                        amount=row["amount"],
+                        profit_amount=row["profit_amount"],
+                    )
+                    if item.product:
+                        product = Product.objects.select_for_update().get(id=item.product_id)
+                        product.stock_quantity += row["quantity"]
+                        product.save(update_fields=["stock_quantity"])
+                        StockMovement.objects.create(
+                            product=product,
+                            order=order,
+                            movement_type=StockMovement.TYPE_REFUND,
+                            quantity_delta=row["quantity"],
+                            reason=f"Refund order #{order.order_number}",
+                            note=f"Refund #{refund.id}",
+                        )
+
+                order.status = "refunded" if order.net_amount() <= 0 else "paid"
+                order.is_active = False
+                update_fields = ["status", "is_active"]
+                if order.status == "refunded":
+                    order.stock_deducted_at = None
+                    update_fields.append("stock_deducted_at")
+                order.save(update_fields=update_fields)
+        except Exception as e:
+            messages.error(request, str(e) if str(e) else "Could not complete refund.")
+            return redirect("refund_order", order_id=order.id)
 
         device_id = get_device_id(request)
         if device_id:
-            enqueue_refund_receipt(order=order, target_device_id=device_id)
+            enqueue_refund_receipt(order=order, refund=refund, target_device_id=device_id)
             messages.success(request, "Printing: Refund receipt sent to this device.")
         else:
             messages.error(
@@ -1428,14 +1634,19 @@ def refund_order(request, order_id):
                 "Refund completed, but refund receipt was NOT printed because Device ID is not set.",
             )
 
-        return redirect("pos_home")
+        return redirect("view_order", order_id=order.id)
 
+    _attach_refund_state(order)
     return render(
         request,
         "pos/refund_confirm.html",
         {
             "order": order,
+            "items": _refund_context_items(order),
             "total": order.total_amount(),
+            "refunded_total": order.refunded_total,
+            "net_total": order.net_total,
+            "payment_methods": Payment.PAYMENT_METHODS,
         },
     )
 
@@ -1457,9 +1668,14 @@ def day_view(request):
         .prefetch_related("items", "payments")
     )
 
-    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
-    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    refunds_qs = Refund.objects.filter(refunded_at__date=selected).prefetch_related("items", "order")
+    refund_total = sum((refund.amount for refund in refunds_qs), Decimal("0"))
+    refund_profit = sum((refund.profit_amount for refund in refunds_qs), Decimal("0"))
+    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0")) - refund_total
+    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0")) - refund_profit
     payment_totals = _payment_breakdown(orders_qs)
+    refund_payment_totals = _refunds_payment_breakdown(refunds_qs)
+    payment_totals = _net_payment_totals(payment_totals, refund_payment_totals)
     expenses_qs = Expense.objects.filter(date=selected).order_by("-created_at", "-id")
     total_expenses = _sum_expenses(expenses_qs)
     net_profit = total_profit - total_expenses
@@ -1475,6 +1691,8 @@ def day_view(request):
             "orders": page_obj,
             "page_obj": page_obj,
             "total_order_count": paginator.count,
+            "refunds": refunds_qs,
+            "refund_total": refund_total,
             "total_sales": total_sales,
             "total_profit": total_profit,
             "total_cash": payment_totals["cash"],
@@ -1515,9 +1733,17 @@ def month_view(request):
         .prefetch_related("items", "payments")
     )
 
-    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0"))
-    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0"))
+    refunds_qs = Refund.objects.filter(
+        refunded_at__year=selected_year,
+        refunded_at__month=selected_month,
+    ).prefetch_related("items", "order")
+    refund_total = sum((refund.amount for refund in refunds_qs), Decimal("0"))
+    refund_profit = sum((refund.profit_amount for refund in refunds_qs), Decimal("0"))
+    total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0")) - refund_total
+    total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0")) - refund_profit
     payment_totals = _payment_breakdown(orders_qs)
+    refund_payment_totals = _refunds_payment_breakdown(refunds_qs)
+    payment_totals = _net_payment_totals(payment_totals, refund_payment_totals)
     expenses_qs = Expense.objects.filter(date__year=selected_year, date__month=selected_month)
     total_expenses = _sum_expenses(expenses_qs)
     net_profit = total_profit - total_expenses
@@ -1536,6 +1762,8 @@ def month_view(request):
             "orders": page_obj,
             "page_obj": page_obj,
             "total_order_count": paginator.count,
+            "refunds": refunds_qs,
+            "refund_total": refund_total,
             "total_sales": total_sales,
             "total_profit": total_profit,
             "total_cash": payment_totals["cash"],

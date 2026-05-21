@@ -177,6 +177,7 @@ def sale_receipt_text(
 def refund_receipt_text(
     *,
     order,
+    refund=None,
     items,
     total,
     copy_label: str,
@@ -193,10 +194,15 @@ def refund_receipt_text(
     lines.append(_center(f"{copy_label} COPY", width))
     lines.append(_hr(width))
     lines.append(_line_lr("Order #", str(order.order_number), width))
+    if refund:
+        lines.append(_line_lr("Refund #", str(refund.id), width))
     if _text(getattr(order, "customer_name", "")):
         lines.append(_line_lr("Customer", _text(order.customer_name), width))
     created = timezone.localtime(order.created_at) if order.created_at else timezone.now()
     lines.append(_line_lr("Original", created.strftime("%Y-%m-%d %H:%M"), width))
+    if refund:
+        refunded_at = timezone.localtime(refund.refunded_at) if refund.refunded_at else timezone.now()
+        lines.append(_line_lr("Refunded", refunded_at.strftime("%Y-%m-%d %H:%M"), width))
     lines.append(_hr(width))
 
     header_box = "Box" if has_box else None
@@ -217,11 +223,6 @@ def refund_receipt_text(
         )
 
     lines.append(_hr(width))
-    subtotal = getattr(order, "subtotal_amount", lambda: total)()
-    discount = getattr(order, "discount_amount", lambda: Decimal("0"))()
-    if Decimal(str(discount)) > 0:
-        lines.append(_line_lr("SUBTOTAL", _money(subtotal), width))
-        lines.append(_line_lr("DISCOUNT", "-" + _money(discount), width))
     lines.append(_line_lr("REFUND TOTAL", _money(total), width))
 
     payments = list(payments or [])
@@ -232,7 +233,10 @@ def refund_receipt_text(
             label = method
             if getattr(p, "method", "") == "bank" and getattr(p, "bank_name", None):
                 label = f"BANK ({_text(p.bank_name)})"
-            lines.append(_line_lr(label, _money(p.amount_received), width))
+            amount = getattr(p, "amount_received", None)
+            if amount is None:
+                amount = getattr(p, "amount", 0)
+            lines.append(_line_lr(label, _money(amount), width))
             if getattr(p, "method", "") == "cash" and getattr(p, "change_given", None):
                 if Decimal(p.change_given or 0) > 0:
                     lines.append(_line_lr("CHANGE", _money(p.change_given), width))
@@ -309,7 +313,7 @@ def _expense_label(expense) -> str:
     return category or description or "Expense"
 
 
-def _payment_breakdown(orders):
+def _payment_breakdown(orders, refunds=None):
     breakdown = {
         "cash": Decimal("0"),
         "wave": Decimal("0"),
@@ -324,11 +328,16 @@ def _payment_breakdown(orders):
                 amount -= Decimal(str(getattr(payment, "change_given", 0) or 0))
             if method in breakdown:
                 breakdown[method] += amount
+    for refund in refunds or []:
+        method = getattr(refund, "method", "") or ""
+        if method in breakdown:
+            breakdown[method] -= Decimal(str(getattr(refund, "amount", 0) or 0))
     return breakdown
 
 
-def day_summary_text(*, date, orders, expenses=None, width: int = LINE_WIDTH_80MM) -> str:
+def day_summary_text(*, date, orders, refunds=None, expenses=None, width: int = LINE_WIDTH_80MM) -> str:
     orders = list(orders)
+    refunds = list(refunds or [])
     expenses = list(expenses or [])
     lines = []
     lines.append(_center("G-A SHOP", width))
@@ -351,10 +360,24 @@ def day_summary_text(*, date, orders, expenses=None, width: int = LINE_WIDTH_80M
         total_profit += profit
         lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
 
+    refund_total = Decimal("0")
+    refund_profit = Decimal("0")
+    for refund in refunds:
+        amount = Decimal(str(getattr(refund, "amount", 0) or 0))
+        profit = Decimal(str(getattr(refund, "profit_amount", 0) or 0))
+        refund_total += amount
+        refund_profit += profit
+        total_sales -= amount
+        total_profit -= profit
+        order_number = getattr(getattr(refund, "order", None), "order_number", "")
+        lines.append(_line_lr(f"Refund #{order_number}", "-" + _money(amount), width))
+
     lines.append(_hr(width))
     lines.append(_line_lr("Orders", str(count), width))
+    if refund_total:
+        lines.append(_line_lr("Refunds", "-" + _money(refund_total), width))
     lines.append(_line_lr("Total Sales", _money(total_sales), width))
-    payments = _payment_breakdown(orders)
+    payments = _payment_breakdown(orders, refunds)
     lines.append(_hr(width))
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))
@@ -381,8 +404,9 @@ def day_summary_text(*, date, orders, expenses=None, width: int = LINE_WIDTH_80M
     return "\n".join(lines)
 
 
-def month_summary_text(*, year: int, month: int, orders, expenses=None, width: int = LINE_WIDTH_80MM) -> str:
+def month_summary_text(*, year: int, month: int, orders, refunds=None, expenses=None, width: int = LINE_WIDTH_80MM) -> str:
     orders = list(orders)
+    refunds = list(refunds or [])
     expenses = list(expenses or [])
     lines = []
     lines.append(_center("G-A SHOP", width))
@@ -405,10 +429,24 @@ def month_summary_text(*, year: int, month: int, orders, expenses=None, width: i
         total_profit += profit
         lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
 
+    refund_total = Decimal("0")
+    refund_profit = Decimal("0")
+    for refund in refunds:
+        amount = Decimal(str(getattr(refund, "amount", 0) or 0))
+        profit = Decimal(str(getattr(refund, "profit_amount", 0) or 0))
+        refund_total += amount
+        refund_profit += profit
+        total_sales -= amount
+        total_profit -= profit
+        order_number = getattr(getattr(refund, "order", None), "order_number", "")
+        lines.append(_line_lr(f"Refund #{order_number}", "-" + _money(amount), width))
+
     lines.append(_hr(width))
     lines.append(_line_lr("Orders", str(count), width))
+    if refund_total:
+        lines.append(_line_lr("Refunds", "-" + _money(refund_total), width))
     lines.append(_line_lr("Total Sales", _money(total_sales), width))
-    payments = _payment_breakdown(orders)
+    payments = _payment_breakdown(orders, refunds)
     lines.append(_hr(width))
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))

@@ -2,35 +2,110 @@
 {% load pos_filters %}
 {% block content %}
 
-<div class="max-w-xl mx-auto p-6">
-    <h1 class="text-2xl md:text-3xl font-extrabold text-red-800 mb-6 tracking-tight">
-        REFUND ORDER #{{ order.order_number }}
-    </h1>
-
-    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div class="flex items-center justify-between mb-5">
-            <div class="text-sm font-semibold text-slate-500 uppercase tracking-wide">Total amount</div>
-            <div class="text-3xl font-extrabold text-slate-900 tabular-nums">{{ total|whole }}</div>
+<div class="max-w-5xl mx-auto p-6">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h1 class="text-2xl font-extrabold text-red-800 tracking-tight">Refund Order #{{ order.order_number }}</h1>
+                <p class="text-sm text-slate-500 mt-1">Choose the receipt lines and the refund method.</p>
+            </div>
+            <a href="{% url 'view_order' order.id %}"
+               class="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50">
+                <span class="inline-flex items-center gap-2"><i class="bi bi-arrow-left"></i><span>Back</span></span>
+            </a>
         </div>
 
-        <div class="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl mb-6 text-base font-semibold">
-            WARNING: This action is <span class="font-extrabold">PERMANENT</span>.<br>
-            The order will be marked as <span class="font-extrabold">REFUNDED</span>.<br>
-            Refunded orders cannot be printed.
+        <div class="grid gap-4 sm:grid-cols-3 p-6 bg-slate-50 border-b border-slate-200">
+            <div>
+                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Original Total</div>
+                <div class="mt-1 text-2xl font-extrabold text-slate-900 tabular-nums">{{ total|whole }}</div>
+            </div>
+            <div>
+                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Already Refunded</div>
+                <div class="mt-1 text-2xl font-extrabold text-red-700 tabular-nums">{{ refunded_total|whole }}</div>
+            </div>
+            <div>
+                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Balance Left</div>
+                <div class="mt-1 text-2xl font-extrabold text-emerald-700 tabular-nums">{{ net_total|whole }}</div>
+            </div>
         </div>
 
-        <form method="post" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form method="post" class="p-6 space-y-6">
             {% csrf_token %}
 
-            <button type="submit"
-                    class="bg-red-800 text-white px-6 py-3 rounded-xl text-base font-extrabold hover:bg-red-900">
-                <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-arrow-counterclockwise"></i><span>CONFIRM REFUND</span></span>
-            </button>
+            <div class="rounded-xl border border-slate-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3 text-left">Item</th>
+                                <th class="px-4 py-3 text-right">Bought</th>
+                                <th class="px-4 py-3 text-right">Refunded</th>
+                                <th class="px-4 py-3 text-right">Available</th>
+                                <th class="px-4 py-3 text-right">Refund Qty</th>
+                                <th class="px-4 py-3 text-right">Refund Unit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                                <tr class="border-t border-slate-100">
+                                    <td class="px-4 py-3">
+                                        <div class="font-semibold text-slate-900">{{ item.item_name }}</div>
+                                        {% if item.box %}<div class="text-xs text-slate-500">Box {{ item.box }}</div>{% endif %}
+                                    </td>
+                                    <td class="px-4 py-3 text-right tabular-nums">{{ item.quantity|whole }}</td>
+                                    <td class="px-4 py-3 text-right tabular-nums text-red-700">{{ item.refunded_quantity_value|whole }}</td>
+                                    <td class="px-4 py-3 text-right tabular-nums">{{ item.refundable_quantity_value|whole }}</td>
+                                    <td class="px-4 py-3 text-right">
+                                        <input type="number"
+                                               name="quantity_{{ item.id }}"
+                                               min="0"
+                                               max="{{ item.refundable_quantity_value }}"
+                                               step="0.01"
+                                               value="0"
+                                               class="w-28 border border-slate-200 rounded-lg px-3 py-2 text-right tabular-nums"
+                                               {% if item.refundable_quantity_value <= 0 %}disabled{% endif %}>
+                                    </td>
+                                    <td class="px-4 py-3 text-right tabular-nums">{{ item.refund_unit_amount|whole }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-            <a href="{% url 'pos_home' %}"
-               class="bg-slate-700 text-white px-6 py-3 rounded-xl text-base font-extrabold hover:bg-slate-800 text-center">
-                <span class="inline-flex items-center justify-center gap-2"><i class="bi bi-x-circle"></i><span>Cancel</span></span>
-            </a>
+            <div class="grid gap-4 sm:grid-cols-3">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Refund Method</label>
+                    <select name="method" class="w-full border border-slate-200 rounded-xl px-3 py-2 bg-white">
+                        {% for value,label in payment_methods %}
+                            <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Bank Name</label>
+                    <input name="bank_name" class="w-full border border-slate-200 rounded-xl px-3 py-2 bg-white" placeholder="Required for bank">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Note</label>
+                    <input name="note" class="w-full border border-slate-200 rounded-xl px-3 py-2 bg-white" placeholder="Optional">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-3 justify-end">
+                <a href="{% url 'view_order' order.id %}"
+                   class="inline-flex items-center justify-center px-5 py-3 rounded-xl text-sm font-extrabold"
+                   style="background:#334155;color:#ffffff;border:1px solid #1e293b;min-width:110px;text-decoration:none;">
+                    <span>Cancel</span>
+                </a>
+                <button type="submit"
+                        class="inline-flex items-center justify-center px-5 py-3 rounded-xl text-sm font-extrabold"
+                        style="background:#991b1b;color:#ffffff;border:1px solid #7f1d1d;min-width:150px;box-shadow:none;"
+                        onclick="return confirm('Create this refund and add refunded stock back?');">
+                    <span>Complete Refund</span>
+                </button>
+            </div>
         </form>
     </div>
 </div>

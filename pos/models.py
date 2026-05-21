@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.utils import timezone
@@ -259,6 +261,26 @@ class Order(models.Model):
         total = self.items.aggregate(total=Sum(profit_expr))["total"]
         return (total or 0) - self.discount_amount()
 
+    def refunded_amount(self):
+        total = self.refunds.aggregate(total=Sum("amount"))["total"]
+        return total or Decimal("0")
+
+    def refunded_profit(self):
+        total = self.refunds.aggregate(total=Sum("profit_amount"))["total"]
+        return total or Decimal("0")
+
+    def net_amount(self):
+        net = Decimal(str(self.total_amount())) - Decimal(str(self.refunded_amount()))
+        return net if net > 0 else Decimal("0")
+
+    def refund_status_label(self):
+        refunded = Decimal(str(self.refunded_amount()))
+        if refunded <= 0:
+            return self.get_status_display()
+        if self.net_amount() <= 0:
+            return "Refunded"
+        return "Partial refund"
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
@@ -299,6 +321,14 @@ class OrderItem(models.Model):
     def line_profit(self):
         return (self.selling_price - self.cost_price_snapshot) * self.quantity
 
+    def refunded_quantity(self):
+        total = self.refund_items.aggregate(total=Sum("quantity"))["total"]
+        return total or Decimal("0")
+
+    def refundable_quantity(self):
+        remaining = Decimal(str(self.quantity)) - Decimal(str(self.refunded_quantity()))
+        return remaining if remaining > 0 else Decimal("0")
+
     def __str__(self):
         return f"{self.item_name} x {self.quantity}"
 
@@ -320,3 +350,54 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.method.upper()} payment for Order #{self.order.order_number}"
+
+
+class Refund(models.Model):
+    PAYMENT_METHODS = Payment.PAYMENT_METHODS
+
+    order = models.ForeignKey(Order, related_name="refunds", on_delete=models.PROTECT)
+    method = models.CharField(max_length=20, choices=PAYMENT_METHODS)
+    bank_name = models.CharField(max_length=100, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    profit_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    refunded_at = models.DateTimeField(default=timezone.now)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-refunded_at", "-id"]
+        indexes = [
+            models.Index(fields=["order", "-refunded_at"]),
+            models.Index(fields=["method", "-refunded_at"]),
+            models.Index(fields=["refunded_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.method.upper()} refund for Order #{self.order.order_number}"
+
+
+class RefundItem(models.Model):
+    refund = models.ForeignKey(Refund, related_name="items", on_delete=models.CASCADE)
+    order_item = models.ForeignKey(OrderItem, related_name="refund_items", on_delete=models.PROTECT)
+    product = models.ForeignKey(
+        Product,
+        related_name="refund_items",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    item_name = models.CharField(max_length=255)
+    box = models.CharField(max_length=50, null=True, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    selling_price = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    profit_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    def line_total(self):
+        return self.amount
+
+    def line_profit(self):
+        return self.profit_amount
+
+    def __str__(self):
+        return f"Refund {self.item_name} x {self.quantity}"

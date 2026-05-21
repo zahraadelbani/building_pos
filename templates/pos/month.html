@@ -47,6 +47,12 @@
                     </div>
                 </div>
                 <div class="rounded-2xl border border-slate-200 p-4">
+                    <div class="text-xs font-semibold text-slate-500 uppercase">Refunds</div>
+                    <div class="mt-1 text-2xl font-extrabold text-red-700">
+                        {{ refund_total|whole }}
+                    </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 p-4">
                     <div class="text-xs font-semibold text-slate-500 uppercase">Gross Profit</div>
                     <div class="mt-1 text-2xl font-extrabold text-slate-900">
                         {{ total_profit|whole }}
@@ -159,6 +165,41 @@
                             <tr>
                                 <td colspan="7" class="p-8 text-center text-slate-400">
                                     No paid orders for this month.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 overflow-hidden">
+                <div class="bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between">
+                    <span>Refunds</span>
+                    <span class="text-xs text-slate-500">{{ refund_total|whole }} total</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-white border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="p-3 text-left">Order #</th>
+                                <th class="p-3 text-left">Date</th>
+                                <th class="p-3 text-left">Method</th>
+                                <th class="p-3 text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for refund in refunds %}
+                            <tr class="border-t border-slate-100">
+                                <td class="p-3 font-semibold text-slate-900">#{{ refund.order.order_number }}</td>
+                                <td class="p-3 text-slate-700">{{ refund.refunded_at|date:"Y-m-d H:i" }}</td>
+                                <td class="p-3 text-slate-700">{{ refund.method|upper }}</td>
+                                <td class="p-3 text-right text-red-700 font-semibold">-{{ refund.amount|whole }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4" class="p-8 text-center text-slate-400">
+                                    No refunds for this month.
                                 </td>
                             </tr>
                         {% endfor %}
