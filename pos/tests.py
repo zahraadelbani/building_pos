@@ -47,6 +47,78 @@ class MonthSummaryTests(TestCase):
         self.assertEqual(response.context["total_expenses"], Decimal("0"))
         self.assertEqual(response.context["net_profit"], Decimal("40"))
 
+    def test_refunds_and_expenses_reduce_matching_cash_balance_in_day_and_month_reports(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 9, 10, 0))
+        order = Order.objects.create(order_number=99, status="paid", is_active=False, created_at=paid_at)
+        item = OrderItem.objects.create(
+            order=order,
+            item_name="Cement",
+            quantity=Decimal("10"),
+            selling_price=Decimal("100"),
+            cost_price_snapshot=Decimal("60"),
+        )
+        Payment.objects.create(
+            order=order, method="cash", amount_received=Decimal("1000"), change_given=Decimal("0"), paid_at=paid_at
+        )
+        refund = Refund.objects.create(
+            order=order,
+            method="cash",
+            amount=Decimal("500"),
+            profit_amount=Decimal("200"),
+            refunded_at=paid_at,
+        )
+        RefundItem.objects.create(
+            refund=refund,
+            order_item=item,
+            item_name=item.item_name,
+            quantity=Decimal("5"),
+            selling_price=item.selling_price,
+            cost_price_snapshot=item.cost_price_snapshot,
+            amount=Decimal("500"),
+            profit_amount=Decimal("200"),
+        )
+        expense = Expense.objects.create(
+            date=paid_at.date(),
+            category=Expense.CATEGORY_TRANSPORT,
+            description="Delivery fuel",
+            amount=Decimal("100"),
+            payment_method=Expense.PAYMENT_CASH,
+        )
+
+        day_response = self.client.get(reverse("day_view"), {"date": "2026-04-09"})
+        month_response = self.client.get(reverse("month_view"), {"month": "2026-04"})
+
+        for response in (day_response, month_response):
+            self.assertEqual(response.context["total_cash"], Decimal("400"))
+            self.assertEqual(response.context["total_sales"], Decimal("500"))
+            self.assertEqual(response.context["total_expenses"], Decimal("100"))
+            self.assertEqual(response.context["net_profit"], Decimal("100"))
+
+        summary = day_summary_text(
+            date=paid_at.date(), orders=[order], refunds=[refund], expenses=[expense]
+        )
+        self.assertIn("Cash", summary)
+        self.assertIn("400", summary)
+
+    def test_fully_refunded_order_keeps_original_payment_in_period_before_refund_is_subtracted(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 8, 10, 0))
+        order = self._create_paid_order(order_number=98, paid_at=paid_at, quantity="2", cost="30", selling="50")
+        order.status = "refunded"
+        order.save(update_fields=["status"])
+        Refund.objects.create(
+            order=order,
+            method="cash",
+            amount=Decimal("100"),
+            profit_amount=Decimal("40"),
+            refunded_at=paid_at,
+        )
+
+        response = self.client.get(reverse("day_view"), {"date": "2026-04-08"})
+
+        self.assertEqual(response.context["total_cash"], Decimal("0"))
+        self.assertEqual(response.context["total_sales"], Decimal("0"))
+        self.assertEqual(response.context["total_profit"], Decimal("0"))
+
     def test_day_view_paginates_paid_orders_without_changing_totals(self):
         paid_at = timezone.make_aware(datetime(2026, 4, 10, 12, 0))
         for order_number in range(200, 226):
@@ -412,6 +484,91 @@ class DiscountAndCustomerTests(TestCase):
         self.assertIn("DISCOUNT", text)
         self.assertIn("175", text)
 
+    def test_pay_later_requires_and_saves_customer_name(self):
+        order = self._create_order_with_item()
+
+        response = self.client.post(reverse("pay_later", args=[order.id]), {"customer_name": "Fatou Jallow"})
+
+        self.assertRedirects(response, reverse("pos_home"), fetch_redirect_response=False)
+        order.refresh_from_db()
+        self.assertEqual(order.customer_name, "Fatou Jallow")
+        self.assertFalse(order.is_active)
+
+        unnamed_order = Order.objects.create(order_number=31, status="unpaid", is_active=True)
+        response = self.client.post(reverse("pay_later", args=[unnamed_order.id]), {"customer_name": "   "})
+
+        self.assertRedirects(response, reverse("pos_order", args=[unnamed_order.id]))
+        unnamed_order.refresh_from_db()
+        self.assertTrue(unnamed_order.is_active)
+
+    def test_pay_later_deducts_stock_and_later_payment_does_not_double_deduct(self):
+        product = Product.objects.create(
+            code=330,
+            name="Roof Sheet",
+            cost_price=Decimal("50"),
+            selling_price=Decimal("100"),
+            stock_quantity=Decimal("10"),
+        )
+        order = Order.objects.create(order_number=33, status="unpaid", is_active=True)
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("2"),
+            selling_price=product.selling_price,
+            cost_price_snapshot=product.cost_price,
+        )
+
+        self.client.post(reverse("pay_later", args=[order.id]), {"customer_name": "Fatou Jallow"})
+
+        product.refresh_from_db()
+        order.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("8"))
+        self.assertIsNotNone(order.stock_deducted_at)
+
+        # Reopening releases the reservation so the bill can safely be edited;
+        # completing payment deducts its current items exactly once again.
+        self.client.get(reverse("resume_order", args=[order.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("10"))
+
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("8"))
+
+    def test_unpaid_orders_can_be_searched_by_customer_name(self):
+        matching = Order.objects.create(
+            order_number=31, status="unpaid", is_active=False, customer_name="Fatou Jallow"
+        )
+        Order.objects.create(order_number=32, status="unpaid", is_active=False, customer_name="Someone Else")
+
+        response = self.client.get(reverse("unpaid_orders"), {"q": "fatou"})
+
+        self.assertContains(response, "Fatou Jallow")
+        self.assertContains(response, f"#{matching.order_number}")
+        self.assertNotContains(response, "Someone Else")
+
+    def test_unpaid_receipt_item_can_be_fully_edited(self):
+        order = self._create_order_with_item()
+        item = order.items.get()
+
+        response = self.client.post(
+            reverse("update_order_item", args=[order.id, item.id]),
+            {
+                "item_name": "Premium Cement",
+                "quantity": "3",
+                "selling_price": "125",
+                "box": "Large bag",
+            },
+        )
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        item.refresh_from_db()
+        self.assertEqual(item.item_name, "Premium Cement")
+        self.assertEqual(item.quantity, Decimal("3"))
+        self.assertEqual(item.selling_price, Decimal("125"))
+        self.assertEqual(item.box, "Large bag")
+
     def test_mark_paid_uses_discounted_total(self):
         order = self._create_order_with_item()
         order.discount_type = Order.DISCOUNT_AMOUNT
@@ -463,6 +620,31 @@ class DiscountAndCustomerTests(TestCase):
 
 
 class StockLogicTests(TestCase):
+    def test_paid_receipt_item_correction_updates_stock_total_and_payment(self):
+        product = Product.objects.create(
+            code=18, name="Blocks", cost_price=Decimal("5"), selling_price=Decimal("10"), stock_quantity=Decimal("10")
+        )
+        order = Order.objects.create(order_number=18, status="unpaid")
+        item = OrderItem.objects.create(
+            order=order, product=product, item_name="Blocks", quantity=Decimal("2"),
+            selling_price=Decimal("10"), cost_price_snapshot=Decimal("5")
+        )
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        response = self.client.post(
+            reverse("correct_paid_order_item", args=[order.id, item.id]),
+            {"item_name": "Large Blocks", "quantity": "3", "selling_price": "12", "box": "Pallet"},
+        )
+
+        self.assertRedirects(response, reverse("view_order", args=[order.id]))
+        item.refresh_from_db()
+        product.refresh_from_db()
+        payment = order.payments.get()
+        self.assertEqual(item.item_name, "Large Blocks")
+        self.assertEqual(product.stock_quantity, Decimal("7"))
+        self.assertEqual(order.total_amount(), Decimal("36"))
+        self.assertEqual(payment.amount_received - payment.change_given, Decimal("36"))
+
     def test_product_with_no_stock_can_be_added_to_order(self):
         order = Order.objects.create(order_number=19, status="unpaid")
         product = Product.objects.create(
@@ -632,6 +814,33 @@ class StockLogicTests(TestCase):
         refund = Refund.objects.get(order=order)
         self.assertEqual(refund.method, "wave")
         self.assertEqual(refund.items.get().quantity, Decimal("1.00"))
+
+    def test_stock_summary_counts_refunds_against_sold_quantity(self):
+        order = Order.objects.create(order_number=32, status="unpaid")
+        product = Product.objects.create(
+            code=32,
+            name="Panels",
+            cost_price=Decimal("10"),
+            selling_price=Decimal("20"),
+            stock_quantity=Decimal("5"),
+        )
+        item = OrderItem.objects.create(
+            order=order,
+            product=product,
+            item_name=product.name,
+            quantity=Decimal("3"),
+            selling_price=Decimal("20"),
+            cost_price_snapshot=Decimal("10"),
+        )
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+        self.client.post(reverse("refund_order", args=[order.id]), {f"quantity_{item.id}": "1"})
+
+        response = self.client.get(reverse("stock_movements"), {"product": str(product.id)})
+
+        self.assertEqual(response.status_code, 200)
+        row = response.context["summary_rows"][0]
+        self.assertEqual(row["sold_total"], Decimal("2.00"))
+        self.assertEqual(row["remaining"], Decimal("3.00"))
 
     def test_partial_refund_cannot_exceed_remaining_quantity(self):
         order = Order.objects.create(order_number=29, status="unpaid")

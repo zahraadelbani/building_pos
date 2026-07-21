@@ -121,6 +121,14 @@ def _net_payment_totals(payment_totals, refund_totals):
     }
 
 
+def _expenses_payment_breakdown(expenses):
+    totals = {value: Decimal("0") for value, _label in Expense.PAYMENT_METHODS}
+    for expense in expenses:
+        if expense.payment_method in totals:
+            totals[expense.payment_method] += Decimal(str(expense.amount or 0))
+    return totals
+
+
 def _deduct_order_stock(order):
     if order.stock_deducted_at:
         return
@@ -467,7 +475,7 @@ def stock_movements_page(request):
         or Decimal("0")
     )
     total_sold_delta = (
-        movements.filter(movement_type=StockMovement.TYPE_SALE)
+        movements.filter(movement_type__in=[StockMovement.TYPE_SALE, StockMovement.TYPE_REFUND])
         .aggregate(total=Sum("quantity_delta"))["total"]
         or Decimal("0")
     )
@@ -495,7 +503,8 @@ def stock_movements_page(request):
         ),
         sold_delta_total=Sum(
             "stock_movements__quantity_delta",
-            filter=summary_filter & Q(stock_movements__movement_type=StockMovement.TYPE_SALE),
+            filter=summary_filter
+            & Q(stock_movements__movement_type__in=[StockMovement.TYPE_SALE, StockMovement.TYPE_REFUND]),
         ),
     ):
         stocked_total = product.stocked_total or Decimal("0")
@@ -601,6 +610,7 @@ def reprint_orders(request):
     page_obj = paginator.get_page(page_number)
     for order in page_obj:
         _attach_refund_state(order)
+        order.can_edit_receipt = order.status == "paid" and not order.refunds.exists()
 
     return render(
         request,
@@ -641,8 +651,92 @@ def view_order(request, order_id):
             "refunded_total": order.refunded_total,
             "net_total": order.net_total,
             "back_url": back_url,
+            "can_edit": order.status == "paid" and not order.refunds.exists(),
         },
     )
+
+
+def _rebalance_order_payments(order):
+    """Keep payment-method totals equal to a corrected paid receipt total."""
+    payments = list(order.payments.select_for_update().order_by("id"))
+    if not payments:
+        return
+
+    target = _money(order.total_amount())
+    net_amounts = []
+    for payment in payments:
+        net = Decimal(str(payment.amount_received))
+        if payment.method == "cash":
+            net -= Decimal(str(payment.change_given))
+        net_amounts.append(max(net, Decimal("0")))
+
+    weight_total = sum(net_amounts, Decimal("0"))
+    allocated = Decimal("0")
+    for index, payment in enumerate(payments):
+        if index == len(payments) - 1:
+            new_net = target - allocated
+        elif weight_total:
+            new_net = _money(target * net_amounts[index] / weight_total)
+            allocated += new_net
+        else:
+            new_net = Decimal("0")
+
+        payment.amount_received = new_net + (
+            Decimal(str(payment.change_given)) if payment.method == "cash" else Decimal("0")
+        )
+        payment.save(update_fields=["amount_received"])
+
+
+def correct_paid_order_item(request, order_id, item_id):
+    if request.method != "POST":
+        return redirect("view_order", order_id=order_id)
+
+    item_name = (request.POST.get("item_name") or "").strip()
+    box = (request.POST.get("box") or "").strip()[:50]
+    try:
+        quantity = Decimal((request.POST.get("quantity") or "").strip())
+        selling_price = Decimal((request.POST.get("selling_price") or "").strip())
+    except Exception:
+        messages.error(request, "Quantity and selling price must be valid numbers.")
+        return redirect("view_order", order_id=order_id)
+
+    if not item_name or quantity <= 0 or selling_price <= 0:
+        messages.error(request, "Item name, quantity, and selling price are required.")
+        return redirect("view_order", order_id=order_id)
+
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="paid")
+        if order.refunds.exists():
+            messages.error(request, "A receipt with refund history cannot be edited.")
+            return redirect("view_order", order_id=order.id)
+
+        item = get_object_or_404(
+            OrderItem.objects.select_for_update().select_related("product"), id=item_id, order=order
+        )
+        old_quantity = Decimal(str(item.quantity))
+        quantity_change = quantity - old_quantity
+
+        if item.product_id and quantity_change:
+            product = Product.objects.select_for_update().get(id=item.product_id)
+            product.stock_quantity -= quantity_change
+            product.save(update_fields=["stock_quantity"])
+            StockMovement.objects.create(
+                product=product,
+                order=order,
+                movement_type=StockMovement.TYPE_SALE,
+                quantity_delta=-quantity_change,
+                reason=f"Corrected paid order #{order.order_number}",
+            )
+
+        item.item_name = item_name[:255]
+        item.quantity = quantity
+        item.selling_price = selling_price
+        item.box = box or None
+        item.save(update_fields=["item_name", "quantity", "selling_price", "box"])
+        _rebalance_order_payments(order)
+
+    messages.success(request, f"Corrected item on paid receipt #{order.order_number}.")
+    return redirect("view_order", order_id=order.id)
 
 
 def edit_product(request, product_id):
@@ -1205,8 +1299,8 @@ def delete_order(request, order_id):
     with transaction.atomic():
         order = get_object_or_404(Order.objects.select_for_update(), id=order_id)
         order_number = order.order_number
-        if order.status == "paid":
-            _restore_order_stock(order, reason_prefix="Deleted paid")
+        if order.stock_deducted_at:
+            _restore_order_stock(order, reason_prefix="Deleted")
             StockMovement.objects.filter(order=order).delete()
 
         Refund.objects.filter(order=order).delete()
@@ -1241,11 +1335,16 @@ def update_order_item(request, order_id, item_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
 
+    item_name = (request.POST.get("item_name") or "").strip()
     quantity_raw = (request.POST.get("quantity") or "").strip()
     selling_price_raw = (request.POST.get("selling_price") or "").strip()
     box = (request.POST.get("box") or "").strip()
     if len(box) > 50:
         box = box[:50]
+
+    if not item_name:
+        messages.error(request, "Item name is required.")
+        return redirect("pos_order", order_id=order_id)
 
     try:
         quantity = Decimal(quantity_raw)
@@ -1266,10 +1365,11 @@ def update_order_item(request, order_id, item_id):
             order=order,
         )
 
+        item.item_name = item_name[:255]
         item.quantity = quantity
         item.selling_price = selling_price
         item.box = box or None
-        item.save(update_fields=["quantity", "selling_price", "box"])
+        item.save(update_fields=["item_name", "quantity", "selling_price", "box"])
 
     messages.success(request, f"Updated item: {item.item_name}")
     return redirect("pos_order", order_id=order_id)
@@ -1277,17 +1377,31 @@ def update_order_item(request, order_id, item_id):
 
 def pay_later(request, order_id):
     order = get_object_or_404(Order, id=order_id, status="unpaid")
-    order.is_active = False
-    order.save()
+
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order.id)
+
+    customer_name = (request.POST.get("customer_name") or "").strip()
+    if not customer_name:
+        messages.error(request, "Customer name is required for an unpaid bill.")
+        return redirect("pos_order", order_id=order.id)
+
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="unpaid")
+        order.customer_name = customer_name[:255]
+        order.is_active = False
+        order.save(update_fields=["customer_name", "is_active"])
+        _deduct_order_stock(order)
+    messages.success(request, f"Bill saved for {order.customer_name}. You can find it under Unpaid.")
     return redirect("pos_home")
 
 
 def unpaid_orders(request):
-    query = request.GET.get("q", "")
+    query = request.GET.get("q", "").strip()
     orders = Order.objects.filter(status="unpaid", is_active=False)
 
     if query:
-        orders = orders.filter(order_number__icontains=query)
+        orders = orders.filter(Q(order_number__icontains=query) | Q(customer_name__icontains=query))
 
     paginator = Paginator(orders.order_by("-order_number"), 25)
     page_number = request.GET.get("page") or 1
@@ -1305,9 +1419,13 @@ def unpaid_orders(request):
 
 
 def resume_order(request, order_id):
-    order = get_object_or_404(Order, id=order_id, status="unpaid")
-    order.is_active = True
-    order.save()
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="unpaid")
+        # Return reserved stock while the bill is reopened for editing. It will be
+        # deducted again when the bill is paid or saved for later.
+        _restore_order_stock(order, reason_prefix="Reopened unpaid")
+        order.is_active = True
+        order.save(update_fields=["is_active"])
     return redirect("pos_order", order_id=order.id)
 
 
@@ -1662,7 +1780,7 @@ def day_view(request):
         selected = timezone.localdate()
 
     orders_qs = (
-        Order.objects.filter(status="paid", payments__paid_at__date=selected)
+        Order.objects.exclude(status="unpaid").filter(payments__paid_at__date=selected)
         .distinct()
         .order_by("order_number")
         .prefetch_related("items", "payments")
@@ -1673,11 +1791,11 @@ def day_view(request):
     refund_profit = sum((refund.profit_amount for refund in refunds_qs), Decimal("0"))
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0")) - refund_total
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0")) - refund_profit
-    payment_totals = _payment_breakdown(orders_qs)
-    refund_payment_totals = _refunds_payment_breakdown(refunds_qs)
-    payment_totals = _net_payment_totals(payment_totals, refund_payment_totals)
     expenses_qs = Expense.objects.filter(date=selected).order_by("-created_at", "-id")
     total_expenses = _sum_expenses(expenses_qs)
+    payment_totals = _payment_breakdown(orders_qs)
+    payment_totals = _net_payment_totals(payment_totals, _refunds_payment_breakdown(refunds_qs))
+    payment_totals = _net_payment_totals(payment_totals, _expenses_payment_breakdown(expenses_qs))
     net_profit = total_profit - total_expenses
     paginator = Paginator(orders_qs, 25)
     page_number = request.GET.get("page") or 1
@@ -1723,8 +1841,7 @@ def month_view(request):
         selected_month = today.month
 
     orders_qs = (
-        Order.objects.filter(
-            status="paid",
+        Order.objects.exclude(status="unpaid").filter(
             payments__paid_at__year=selected_year,
             payments__paid_at__month=selected_month,
         )
@@ -1741,11 +1858,11 @@ def month_view(request):
     refund_profit = sum((refund.profit_amount for refund in refunds_qs), Decimal("0"))
     total_sales = sum((o.total_amount() for o in orders_qs), Decimal("0")) - refund_total
     total_profit = sum((o.total_profit() for o in orders_qs), Decimal("0")) - refund_profit
-    payment_totals = _payment_breakdown(orders_qs)
-    refund_payment_totals = _refunds_payment_breakdown(refunds_qs)
-    payment_totals = _net_payment_totals(payment_totals, refund_payment_totals)
     expenses_qs = Expense.objects.filter(date__year=selected_year, date__month=selected_month)
     total_expenses = _sum_expenses(expenses_qs)
+    payment_totals = _payment_breakdown(orders_qs)
+    payment_totals = _net_payment_totals(payment_totals, _refunds_payment_breakdown(refunds_qs))
+    payment_totals = _net_payment_totals(payment_totals, _expenses_payment_breakdown(expenses_qs))
     net_profit = total_profit - total_expenses
     paginator = Paginator(orders_qs, 25)
     page_number = request.GET.get("page") or 1

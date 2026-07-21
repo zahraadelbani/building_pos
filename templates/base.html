@@ -3,10 +3,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Building Materials POS</title>
+    <title>GA POS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260720-4">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         /* Bootstrap icons fallback when CDN fonts are blocked */
@@ -88,56 +88,37 @@
 </head>
 <body class="bg-slate-100 text-slate-900 antialiased">
 
+    <div class="app-shell">
     {% block nav %}
-        <nav class="bg-slate-950 text-slate-100 border-b border-slate-800/70">
-            <div class="max-w-screen-2xl mx-auto px-6 py-4 flex flex-wrap gap-4 items-center justify-between">
-                <div class="flex items-center gap-6">
-                    <a href="{% url 'pos_home' %}" class="text-base font-extrabold tracking-wide text-slate-100 hover:text-white">
-                        BUILDING POS
-                    </a>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <a href="{% url 'pos_home' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            POS
-                        </a>
-                        <a href="{% url 'products' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Products
-                        </a>
-                        <a href="{% url 'stock_movements' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Stock
-                        </a>
-                        <a href="{% url 'stock_alerts' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Stock Alerts
-                        </a>
-                        <a href="{% url 'unpaid_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Unpaid
-                        </a>
-                        <a href="{% url 'reprint_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Refund
-                        </a>
-                        <a href="{% url 'reprint_orders' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Reprint
-                        </a>
-                        <a href="{% url 'day_view' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Day
-                        </a>
-                        <a href="{% url 'month_view' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Month
-                        </a>
-                        <a href="{% url 'expenses' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Expenses
-                        </a>
-                        <a href="{% url 'device_setup' %}" class="px-3 py-2 rounded-lg border border-slate-800 text-slate-200 text-sm font-semibold hover:bg-slate-900 hover:text-white">
-                            Device
-                        </a>
-                    </div>
-                </div>
-
-                <div class="text-xs text-slate-400 hidden md:block">
-                    Industrial POS · LAN printing
-                </div>
+        <div class="app-nav-backdrop" id="app-nav-backdrop" aria-hidden="true"></div>
+        <aside class="app-sidebar" id="app-sidebar" aria-label="Primary navigation">
+            <div class="app-brand"><span class="app-brand-mark" aria-hidden="true">GA</span><span><strong>GA</strong><small>Building materials</small></span></div>
+            <nav class="app-nav">
+                <div class="app-nav-section">Workspace</div>
+                <a href="{% url 'pos_home' %}" class="app-nav-link {% if request.resolver_match.url_name == 'pos_home' or request.resolver_match.url_name == 'pos_order' %}is-active{% endif %}"><i class="bi bi-cash-coin"></i><span>Point of Sale</span></a>
+                <a href="{% url 'products' %}" class="app-nav-link {% if request.resolver_match.url_name == 'products' or request.resolver_match.url_name == 'edit_product' %}is-active{% endif %}"><i class="bi bi-box-seam"></i><span>Products</span></a>
+                <a href="{% url 'unpaid_orders' %}" class="app-nav-link {% if request.resolver_match.url_name == 'unpaid_orders' %}is-active{% endif %}"><i class="bi bi-clock-history"></i><span>Unpaid bills</span></a>
+                <a href="{% url 'reprint_orders' %}" class="app-nav-link {% if request.resolver_match.url_name == 'reprint_orders' or request.resolver_match.url_name == 'view_order' or request.resolver_match.url_name == 'refund_order' %}is-active{% endif %}"><i class="bi bi-receipt"></i><span>Sales & returns</span></a>
+                <div class="app-nav-section">Inventory</div>
+                <a href="{% url 'stock_movements' %}" class="app-nav-link {% if request.resolver_match.url_name == 'stock_movements' %}is-active{% endif %}"><i class="bi bi-arrow-repeat"></i><span>Stock movements</span></a>
+                <a href="{% url 'stock_alerts' %}" class="app-nav-link {% if request.resolver_match.url_name == 'stock_alerts' %}is-active{% endif %}"><i class="bi bi-funnel"></i><span>Stock alerts</span></a>
+                <div class="app-nav-section">Finance & reports</div>
+                <a href="{% url 'day_view' %}" class="app-nav-link {% if request.resolver_match.url_name == 'day_view' %}is-active{% endif %}"><i class="bi bi-graph-up"></i><span>Daily report</span></a>
+                <a href="{% url 'month_view' %}" class="app-nav-link {% if request.resolver_match.url_name == 'month_view' %}is-active{% endif %}"><i class="bi bi-graph-up"></i><span>Monthly report</span></a>
+                <a href="{% url 'expenses' %}" class="app-nav-link {% if request.resolver_match.url_name == 'expenses' %}is-active{% endif %}"><i class="bi bi-receipt"></i><span>Expenses</span></a>
+            </nav>
+            <div class="app-sidebar-footer">
+                <a href="{% url 'device_setup' %}" class="app-device-link"><i class="bi bi-printer"></i><span><strong>Print device</strong><small>Configure this terminal</small></span></a>
+                <div class="app-branch"><span class="app-status-dot"></span><span><strong>Main branch</strong><small>Local network</small></span></div>
             </div>
-        </nav>
+        </aside>
     {% endblock %}
+    <main class="app-main">
+        <header class="app-mobile-header">
+            <button type="button" class="app-menu-button" id="app-menu-button" aria-controls="app-sidebar" aria-expanded="false" aria-label="Open navigation"><span></span><span></span><span></span></button>
+            <a href="{% url 'pos_home' %}" class="app-mobile-brand">GA POS</a>
+            <a href="{% url 'unpaid_orders' %}" class="app-mobile-action" aria-label="Unpaid bills"><i class="bi bi-clock-history"></i></a>
+        </header>
 
     {% if messages %}
         <div id="flash-messages" class="fixed top-16 right-4 space-y-3 z-50">
@@ -155,6 +136,24 @@
 
     {% block content %}
     {% endblock %}
+    </main>
+    </div>
+
+    <script>
+        (function () {
+            const button = document.getElementById("app-menu-button");
+            const sidebar = document.getElementById("app-sidebar");
+            const backdrop = document.getElementById("app-nav-backdrop");
+            if (!button || !sidebar) return;
+            function setOpen(open) {
+                document.body.classList.toggle("app-nav-open", open);
+                button.setAttribute("aria-expanded", open ? "true" : "false");
+            }
+            button.addEventListener("click", function () { setOpen(!document.body.classList.contains("app-nav-open")); });
+            if (backdrop) backdrop.addEventListener("click", function () { setOpen(false); });
+            document.addEventListener("keydown", function (event) { if (event.key === "Escape") setOpen(false); });
+        })();
+    </script>
 
     <script>
         (function () {

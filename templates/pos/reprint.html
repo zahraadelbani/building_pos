@@ -63,8 +63,7 @@
                                     </span>
                                 {% else %}
                                     <a href="{% url 'refund_order' o.id %}"
-                                       class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-extrabold"
-                                       style="background:#991b1b;color:#ffffff;border:1px solid #7f1d1d;min-width:92px;box-shadow:none;text-decoration:none;">
+                                       class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-700 text-white text-sm font-extrabold">
                                         <span>Refund</span>
                                     </a>
                                 {% endif %}
@@ -92,6 +91,12 @@
                                            class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm font-extrabold hover:bg-slate-50">
                                             <span class="inline-flex items-center gap-2"><i class="bi bi-eye"></i><span>View</span></span>
                                         </a>
+                                        {% if o.can_edit_receipt %}
+                                        <a href="{% url 'view_order' o.id %}?next={{ request.get_full_path|urlencode }}#receipt-items"
+                                           class="px-3 py-2 rounded-lg bg-amber-700 text-white text-sm font-extrabold hover:bg-amber-800">
+                                            <span class="inline-flex items-center gap-2"><i class="bi bi-pencil-square"></i><span>Edit</span></span>
+                                        </a>
+                                        {% endif %}
                                         <form method="post" action="{% url 'print_profit_receipt' o.id %}">
                                             {% csrf_token %}
                                             <button class="px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-extrabold hover:bg-slate-900">

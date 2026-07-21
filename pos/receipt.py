@@ -118,7 +118,7 @@ def sale_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center(f"{copy_label} COPY", width))
@@ -187,7 +187,7 @@ def refund_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("REFUND RECEIPT", width))
@@ -251,7 +251,7 @@ def profit_report_text(*, order, items, total, total_profit, width: int = LINE_W
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("PROFIT REPORT (INTERNAL)", width))
@@ -313,7 +313,7 @@ def _expense_label(expense) -> str:
     return category or description or "Expense"
 
 
-def _payment_breakdown(orders, refunds=None):
+def _payment_breakdown(orders, refunds=None, expenses=None):
     breakdown = {
         "cash": Decimal("0"),
         "wave": Decimal("0"),
@@ -332,6 +332,10 @@ def _payment_breakdown(orders, refunds=None):
         method = getattr(refund, "method", "") or ""
         if method in breakdown:
             breakdown[method] -= Decimal(str(getattr(refund, "amount", 0) or 0))
+    for expense in expenses or []:
+        method = getattr(expense, "payment_method", "") or ""
+        if method in breakdown:
+            breakdown[method] -= Decimal(str(getattr(expense, "amount", 0) or 0))
     return breakdown
 
 
@@ -340,7 +344,7 @@ def day_summary_text(*, date, orders, refunds=None, expenses=None, width: int = 
     refunds = list(refunds or [])
     expenses = list(expenses or [])
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("DAY SUMMARY (INTERNAL)", width))
@@ -377,7 +381,7 @@ def day_summary_text(*, date, orders, refunds=None, expenses=None, width: int = 
     if refund_total:
         lines.append(_line_lr("Refunds", "-" + _money(refund_total), width))
     lines.append(_line_lr("Total Sales", _money(total_sales), width))
-    payments = _payment_breakdown(orders, refunds)
+    payments = _payment_breakdown(orders, refunds, expenses)
     lines.append(_hr(width))
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))
@@ -409,7 +413,7 @@ def month_summary_text(*, year: int, month: int, orders, refunds=None, expenses=
     refunds = list(refunds or [])
     expenses = list(expenses or [])
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("MONTH SUMMARY (INTERNAL)", width))
@@ -446,7 +450,7 @@ def month_summary_text(*, year: int, month: int, orders, refunds=None, expenses=
     if refund_total:
         lines.append(_line_lr("Refunds", "-" + _money(refund_total), width))
     lines.append(_line_lr("Total Sales", _money(total_sales), width))
-    payments = _payment_breakdown(orders, refunds)
+    payments = _payment_breakdown(orders, refunds, expenses)
     lines.append(_hr(width))
     lines.append("Payment Breakdown")
     lines.append(_line_lr("Cash", _money(payments["cash"]), width))

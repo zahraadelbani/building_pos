@@ -17,7 +17,7 @@
     <form method="get" class="mb-6 flex gap-3">
         <input type="text" name="q"
                value="{{ query }}"
-               placeholder="Search by order number"
+               placeholder="Search by customer name or order number"
                class="border border-slate-200 p-3 rounded-xl text-base flex-1 bg-white">
 
         <button class="bg-slate-900 text-white px-6 py-3 rounded-xl text-base font-extrabold hover:bg-slate-800">
@@ -30,6 +30,7 @@
         <thead class="bg-slate-50 border-b border-slate-200">
             <tr>
                 <th class="p-3 text-left text-xs uppercase tracking-wide text-slate-500">Order</th>
+                <th class="p-3 text-left text-xs uppercase tracking-wide text-slate-500">Customer</th>
                 <th class="p-3 text-right text-xs uppercase tracking-wide text-slate-500">Total</th>
                 <th class="p-3 text-center text-xs uppercase tracking-wide text-slate-500">Actions</th>
             </tr>
@@ -38,11 +39,12 @@
             {% for o in orders %}
             <tr class="border-b border-slate-100">
                 <td class="p-3 font-semibold text-slate-900">#{{ o.order_number }}</td>
+                <td class="p-3 font-semibold text-slate-900">{{ o.customer_name|default:"—" }}</td>
                 <td class="p-3 text-right font-semibold text-slate-900 tabular-nums">{{ o.total_amount|whole }}</td>
                 <td class="p-3 text-center">
                     <a href="{% url 'resume_order' o.id %}"
                        class="bg-slate-900 text-white px-4 py-2 rounded-lg font-extrabold hover:bg-slate-800 inline-block">
-                        <span class="inline-flex items-center gap-2"><i class="bi bi-folder2-open"></i><span>Reopen</span></span>
+                        <span class="inline-flex items-center gap-2"><i class="bi bi-pencil-square"></i><span>Edit / Pay</span></span>
                     </a>
                     <form method="post" action="{% url 'delete_order' o.id %}" class="inline-block ml-2">
                         {% csrf_token %}
@@ -57,7 +59,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="3" class="p-6 text-center text-gray-500">
+                <td colspan="4" class="p-6 text-center text-gray-500">
                     No unpaid orders
                 </td>
             </tr>

@@ -112,8 +112,7 @@ def enqueue_profit_report(*, order, target_device_id: str):
 
 
 def enqueue_day_summary(*, date, target_device_id: str):
-    orders = Order.objects.filter(
-        status="paid",
+    orders = Order.objects.exclude(status="unpaid").filter(
         payments__paid_at__date=date,
     ).prefetch_related("payments").order_by("order_number")
     orders = orders.distinct()
@@ -131,8 +130,7 @@ def enqueue_day_summary(*, date, target_device_id: str):
 
 
 def enqueue_month_summary(*, year: int, month: int, target_device_id: str):
-    orders = Order.objects.filter(
-        status="paid",
+    orders = Order.objects.exclude(status="unpaid").filter(
         payments__paid_at__year=year,
         payments__paid_at__month=month,
     ).prefetch_related("payments").order_by("order_number")
