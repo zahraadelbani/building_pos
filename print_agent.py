@@ -110,6 +110,26 @@ def _print_logo(printer):
         printer.image(logo_path, impl=impl)
 
 
+def _print_receipt(printer, receipt_text, job_type):
+    """Print receipt headings large, without making the 48-column body wrap."""
+    if job_type not in {"SALE_RECEIPT", "REFUND_RECEIPT"}:
+        printer.text(receipt_text)
+        return
+
+    lines = receipt_text.splitlines(keepends=True)
+    divider_index = next(
+        (index for index, line in enumerate(lines) if line.strip().startswith("---")),
+        len(lines),
+    )
+
+    printer.set(align="center", width=2, height=2)
+    for line in lines[:divider_index]:
+        printer.text(line.strip() + "\n")
+
+    printer.set(align="left", width=1, height=1)
+    printer.text("".join(lines[divider_index:]))
+
+
 # =========================
 # Main loop
 # =========================
@@ -161,7 +181,7 @@ def main():
                 else:
                     printer = _build_printer()
                     _print_logo(printer)
-                    printer.text(receipt_text)
+                    _print_receipt(printer, receipt_text, job_type)
                     printer.cut()
                     printer.close()
 

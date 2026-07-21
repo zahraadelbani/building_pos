@@ -118,7 +118,7 @@ def sale_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("GA", width))
+    lines.append(_center("G-A SHOP", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center(f"{copy_label} COPY", width))
@@ -187,7 +187,7 @@ def refund_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("GA", width))
+    lines.append(_center("G-A SHOP", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("REFUND RECEIPT", width))
