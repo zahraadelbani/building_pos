@@ -92,10 +92,12 @@
                                             <span class="inline-flex items-center gap-2"><i class="bi bi-eye"></i><span>View</span></span>
                                         </a>
                                         {% if o.can_edit_receipt %}
-                                        <a href="{% url 'view_order' o.id %}?next={{ request.get_full_path|urlencode }}#receipt-items"
-                                           class="px-3 py-2 rounded-lg bg-amber-700 text-white text-sm font-extrabold hover:bg-amber-800">
-                                            <span class="inline-flex items-center gap-2"><i class="bi bi-pencil-square"></i><span>Edit</span></span>
-                                        </a>
+                                        <form method="post" action="{% url 'start_paid_order_correction' o.id %}">
+                                            {% csrf_token %}
+                                            <button class="px-3 py-2 rounded-lg bg-amber-700 text-white text-sm font-extrabold hover:bg-amber-800">
+                                                <span class="inline-flex items-center gap-2"><i class="bi bi-pencil-square"></i><span>Edit</span></span>
+                                            </button>
+                                        </form>
                                         {% endif %}
                                         <form method="post" action="{% url 'print_profit_receipt' o.id %}">
                                             {% csrf_token %}

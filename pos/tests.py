@@ -620,6 +620,45 @@ class DiscountAndCustomerTests(TestCase):
 
 
 class StockLogicTests(TestCase):
+    def test_paid_receipt_can_be_reopened_in_pos_and_saved_without_double_stock_deduction(self):
+        product = Product.objects.create(
+            code=17, name="Screw", cost_price=Decimal("100"), selling_price=Decimal("200"), stock_quantity=Decimal("10")
+        )
+        order = Order.objects.create(order_number=17, status="unpaid")
+        item = OrderItem.objects.create(
+            order=order, product=product, item_name=product.name, quantity=Decimal("1"),
+            selling_price=Decimal("200"), cost_price_snapshot=Decimal("100")
+        )
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+
+        response = self.client.post(reverse("start_paid_order_correction", args=[order.id]))
+
+        self.assertRedirects(response, reverse("pos_order", args=[order.id]))
+        order.refresh_from_db()
+        product.refresh_from_db()
+        self.assertEqual(order.status, "unpaid")
+        self.assertTrue(order.is_active)
+        self.assertEqual(product.stock_quantity, Decimal("10"))
+
+        self.client.post(
+            reverse("update_order_item", args=[order.id, item.id]),
+            {"item_name": "Large Screw", "quantity": "2", "selling_price": "250", "box": ""},
+        )
+        response = self.client.post(
+            reverse("save_paid_order_correction", args=[order.id]),
+            {"cash": "0", "bank": "0", "wave": "500", "aps": "0"},
+        )
+
+        self.assertRedirects(response, reverse("view_order", args=[order.id]))
+        order.refresh_from_db()
+        product.refresh_from_db()
+        payment = order.payments.get()
+        self.assertEqual(order.status, "paid")
+        self.assertFalse(order.is_active)
+        self.assertEqual(product.stock_quantity, Decimal("8"))
+        self.assertEqual(payment.method, "wave")
+        self.assertEqual(payment.amount_received, Decimal("500"))
+
     def test_paid_receipt_item_correction_updates_stock_total_and_payment(self):
         product = Product.objects.create(
             code=18, name="Blocks", cost_price=Decimal("5"), selling_price=Decimal("10"), stock_quantity=Decimal("10")

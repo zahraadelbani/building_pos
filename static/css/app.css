@@ -479,15 +479,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .app-main input:hover, .app-main select:hover, .app-main textarea:hover { border-color: #94a3b8; }
 .app-main input:focus, .app-main select:focus, .app-main textarea:focus { outline: none; border-color: var(--app-navy); box-shadow: 0 0 0 3px rgba(20,33,61,.11); }
 .app-main label { color: #475569; }
-.app-main button, .app-main a[class*="px-"] { min-height: 40px; transition: transform .1s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.app-main button, .app-main a[class*="px-"] { min-height: 36px; transition: transform .1s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
 .app-main button:not(:disabled):active, .app-main a[class*="px-"]:active { transform: translateY(1px); }
 .app-main button:disabled { cursor: not-allowed; opacity: .52; }
 
 /* One action language across POS, tables, reports, and dialogs */
 .app-main button,
 .app-main a[class*="px-"] {
-    border-radius: 10px;
-    font-weight: 750;
+    border-radius: 8px;
+    font-size: .875rem;
+    font-weight: 700;
     line-height: 1.25;
     box-shadow: none;
 }
@@ -547,6 +548,43 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .app-main td form, .app-main td > a { vertical-align: middle; }
 .app-main td .flex.flex-wrap { align-items: center; }
+
+/* Compact operational actions; checkout remains intentionally prominent. */
+.app-main table td a[class*="px-"],
+.app-main table td button {
+    min-height: 34px;
+    padding: .4rem .65rem;
+    border-radius: 8px;
+    font-size: .78rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.app-main table td .flex.flex-wrap { gap: .4rem; }
+.app-main table td .inline-flex { gap: .35rem; }
+.app-main table td svg,
+.app-main table td i svg {
+    width: .92rem;
+    height: .92rem;
+    max-width: .92rem;
+    max-height: .92rem;
+}
+.app-main table td form { margin: 0; }
+.app-main .report-actions button,
+.app-main .report-actions a,
+.app-main form[method="get"] button {
+    min-height: 38px;
+    padding-top: .5rem;
+    padding-bottom: .5rem;
+}
+#pay-btn,
+.app-main button[data-payment-confirm],
+#print-modal form > button[type="submit"] {
+    min-height: 48px;
+    border-radius: 10px;
+    font-size: .95rem;
+}
+.pos-side button:not(#pay-btn),
+.pos-side a[class*="px-"] { min-height: 38px; }
 
 /* Daily and monthly reporting */
 .report-page { max-width: 1380px; }

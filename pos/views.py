@@ -392,6 +392,7 @@ def pos_home(request, order_id=None):
             "query": query,
             "products": products,
             "can_delete_order": (order.status == "unpaid" and not order.payments.exists()),
+            "is_paid_correction": order.status == "unpaid" and order.payments.exists(),
             "device_id": get_device_id(request),
         },
     )
@@ -685,6 +686,72 @@ def _rebalance_order_payments(order):
             Decimal(str(payment.change_given)) if payment.method == "cash" else Decimal("0")
         )
         payment.save(update_fields=["amount_received"])
+
+
+def start_paid_order_correction(request, order_id):
+    if request.method != "POST":
+        return redirect("view_order", order_id=order_id)
+
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="paid")
+        if order.refunds.exists():
+            messages.error(request, "A receipt with refund history cannot be edited.")
+            return redirect("view_order", order_id=order.id)
+        if not order.payments.exists():
+            messages.error(request, "This paid receipt has no payment record to preserve.")
+            return redirect("view_order", order_id=order.id)
+
+        _restore_order_stock(order, reason_prefix="Opened paid correction")
+        order.status = "unpaid"
+        order.is_active = True
+        order.save(update_fields=["status", "is_active"])
+
+    messages.warning(request, f"Editing paid receipt #{order.order_number}. Save the correction when finished.")
+    return redirect("pos_order", order_id=order.id)
+
+
+def save_paid_order_correction(request, order_id):
+    if request.method != "POST":
+        return redirect("pos_order", order_id=order_id)
+
+    order = get_object_or_404(Order, id=order_id, status="unpaid")
+    total = order.total_amount()
+    try:
+        payments_to_create, method, amount_received, change = _parse_payments_from_post(request, total)
+    except Exception as e:
+        messages.error(request, str(e) if str(e) else "Invalid corrected payment.")
+        return redirect("pos_order", order_id=order.id)
+
+    with transaction.atomic():
+        order = get_object_or_404(Order.objects.select_for_update(), id=order_id, status="unpaid")
+        if not order.payments.exists():
+            messages.error(request, "This order is not a paid-receipt correction.")
+            return redirect("pos_order", order_id=order.id)
+        if order.refunds.exists():
+            messages.error(request, "A receipt with refund history cannot be edited.")
+            return redirect("pos_order", order_id=order.id)
+        if order.total_amount() <= 0:
+            messages.error(request, "The corrected receipt must contain at least one item.")
+            return redirect("pos_order", order_id=order.id)
+
+        original_paid_at = order.payments.order_by("paid_at", "id").values_list("paid_at", flat=True).first()
+        order.payments.all().delete()
+        for pay_method, pay_amount, pay_bank, pay_change in payments_to_create:
+            Payment.objects.create(
+                order=order,
+                method=pay_method,
+                bank_name=pay_bank,
+                amount_received=pay_amount,
+                change_given=pay_change,
+                paid_at=original_paid_at or timezone.now(),
+            )
+        order.status = "paid"
+        order.is_active = False
+        order.save(update_fields=["status", "is_active"])
+        _deduct_order_stock(order)
+
+    messages.success(request, f"Paid receipt #{order.order_number} and its {method.upper()} payment were corrected successfully.")
+    return redirect("view_order", order_id=order.id)
 
 
 def correct_paid_order_item(request, order_id, item_id):
