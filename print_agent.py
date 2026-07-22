@@ -111,23 +111,18 @@ def _print_logo(printer):
 
 
 def _print_receipt(printer, receipt_text, job_type):
-    """Print receipt headings large, without making the 48-column body wrap."""
+    """Print the three shop-detail lines large without wrapping the body."""
     if job_type not in {"SALE_RECEIPT", "REFUND_RECEIPT"}:
         printer.text(receipt_text)
         return
 
     lines = receipt_text.splitlines(keepends=True)
-    divider_index = next(
-        (index for index, line in enumerate(lines) if line.strip().startswith("---")),
-        len(lines),
-    )
-
     printer.set(align="center", width=2, height=2)
-    for line in lines[:divider_index]:
+    for line in lines[:3]:
         printer.text(line.strip() + "\n")
 
     printer.set(align="left", width=1, height=1)
-    printer.text("".join(lines[divider_index:]))
+    printer.text("".join(lines[3:]))
 
 
 # =========================

@@ -61,7 +61,7 @@
                                                name="quantity_{{ item.id }}"
                                                min="0"
                                                max="{{ item.refundable_quantity_value }}"
-                                               step="0.01"
+                                               step="1"
                                                value="0"
                                                class="w-28 border border-slate-200 rounded-lg px-3 py-2 text-right tabular-nums"
                                                {% if item.refundable_quantity_value <= 0 %}disabled{% endif %}>

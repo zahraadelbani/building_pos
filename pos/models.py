@@ -142,6 +142,25 @@ class StockMovement(models.Model):
         return f"{self.product} {self.quantity_delta} ({self.get_movement_type_display()})"
 
 
+class StockBatch(models.Model):
+    """A FIFO layer of stock that keeps the prices paid and charged for that delivery."""
+
+    product = models.ForeignKey(Product, related_name="stock_batches", on_delete=models.CASCADE)
+    initial_quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    remaining_quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+    selling_price = models.DecimalField(max_digits=10, decimal_places=2)
+    received_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [models.Index(fields=["product", "id"])]
+
+    def __str__(self):
+        return f"{self.product} batch ({self.remaining_quantity} remaining)"
+
+
 class PrintJob(models.Model):
     STATUS_PENDING = "PENDING"
     STATUS_CLAIMED = "CLAIMED"

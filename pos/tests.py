@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, Refund, RefundItem, StockMovement
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, Refund, RefundItem, StockBatch, StockMovement
 from .receipt import day_summary_text, month_summary_text
 from .receipt import sale_receipt_text
 
@@ -174,6 +174,21 @@ class MonthSummaryTests(TestCase):
         self.assertIn("48", text)
         self.assertIn("Gross Profit", text)
         self.assertIn("28", text)
+
+    def test_daily_and_monthly_summaries_show_order_count_without_listing_orders(self):
+        paid_at = timezone.make_aware(datetime(2026, 4, 12, 14, 45))
+        first_order = self._create_paid_order(order_number=120, paid_at=paid_at)
+        second_order = self._create_paid_order(order_number=121, paid_at=paid_at)
+
+        summaries = (
+            day_summary_text(date=paid_at.date(), orders=[first_order, second_order]),
+            month_summary_text(year=2026, month=4, orders=[first_order, second_order]),
+        )
+
+        for text in summaries:
+            self.assertIn("Orders", text)
+            self.assertNotIn("Order #120", text)
+            self.assertNotIn("Order #121", text)
 
     def test_day_view_subtracts_expenses_from_net_profit(self):
         paid_at = timezone.make_aware(datetime(2026, 4, 14, 11, 0))
@@ -620,6 +635,45 @@ class DiscountAndCustomerTests(TestCase):
 
 
 class StockLogicTests(TestCase):
+    def test_restock_prices_wait_for_old_stock_and_crossing_sale_splits_fifo(self):
+        product = Product.objects.create(
+            code=16, name="FIFO Screw", cost_price=Decimal("50"),
+            selling_price=Decimal("100"), stock_quantity=Decimal("10"),
+        )
+
+        response = self.client.post(
+            reverse("adjust_product_stock", args=[product.id]),
+            {
+                "adjustment_type": "restock", "quantity": "10",
+                "cost_price": "100", "selling_price": "200",
+                "reason": "Higher-price delivery",
+            },
+        )
+        self.assertRedirects(response, reverse("products"))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("20"))
+        self.assertEqual(product.selling_price, Decimal("100"))
+
+        order = Order.objects.create(order_number=16, status="unpaid")
+        self.client.post(
+            reverse("add_product_to_order", args=[order.id, product.id]),
+            {"quantity": "12", "selling_price": "100"},
+        )
+        items = list(order.items.order_by("id"))
+        self.assertEqual([(i.quantity, i.cost_price_snapshot, i.selling_price) for i in items], [
+            (Decimal("10"), Decimal("50"), Decimal("100")),
+            (Decimal("2"), Decimal("100"), Decimal("200")),
+        ])
+
+        self.client.post(reverse("mark_order_paid", args=[order.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.stock_quantity, Decimal("8"))
+        self.assertEqual(product.cost_price, Decimal("100"))
+        self.assertEqual(product.selling_price, Decimal("200"))
+        self.assertEqual(list(StockBatch.objects.filter(product=product).values_list("remaining_quantity", flat=True)), [
+            Decimal("0"), Decimal("8"),
+        ])
+
     def test_paid_receipt_can_be_reopened_in_pos_and_saved_without_double_stock_deduction(self):
         product = Product.objects.create(
             code=17, name="Screw", cost_price=Decimal("100"), selling_price=Decimal("200"), stock_quantity=Decimal("10")

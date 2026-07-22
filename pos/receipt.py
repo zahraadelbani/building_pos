@@ -118,7 +118,7 @@ def sale_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA SHOP", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center(f"{copy_label} COPY", width))
@@ -187,7 +187,7 @@ def refund_receipt_text(
     items = list(items)
     has_box = _has_box(items)
     lines = []
-    lines.append(_center("G-A SHOP", width))
+    lines.append(_center("GA SHOP", width))
     lines.append(_center("Jimpex - Kanifing", width))
     lines.append(_center("Tel: 2866668", width))
     lines.append(_center("REFUND RECEIPT", width))
@@ -362,7 +362,6 @@ def day_summary_text(*, date, orders, refunds=None, expenses=None, width: int = 
         profit = Decimal(str(order.total_profit()))
         total_sales += sales
         total_profit += profit
-        lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
 
     refund_total = Decimal("0")
     refund_profit = Decimal("0")
@@ -431,7 +430,6 @@ def month_summary_text(*, year: int, month: int, orders, refunds=None, expenses=
         profit = Decimal(str(order.total_profit()))
         total_sales += sales
         total_profit += profit
-        lines.append(_line_lr(f"Order #{order.order_number}", _money(sales), width))
 
     refund_total = Decimal("0")
     refund_profit = Decimal("0")

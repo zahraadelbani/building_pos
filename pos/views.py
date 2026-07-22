@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, Refund, RefundItem, StockMovement
+from .models import Expense, Order, OrderItem, Payment, PrintJob, Product, Refund, RefundItem, StockBatch, StockMovement
 from .printing import (
     enqueue_day_summary,
     enqueue_month_summary,
@@ -61,6 +61,42 @@ def _order_product_quantities(order):
     for item in order.items.exclude(product__isnull=True).select_related("product"):
         quantities[item.product_id] = quantities.get(item.product_id, Decimal("0")) + Decimal(item.quantity)
     return quantities
+
+
+def _available_batches(product):
+    return product.stock_batches.select_for_update().filter(remaining_quantity__gt=0).order_by("id")
+
+
+def _ensure_legacy_batch(product):
+    """Represent stock created before FIFO batches were introduced."""
+    if product.stock_quantity > 0 and not product.stock_batches.filter(remaining_quantity__gt=0).exists():
+        StockBatch.objects.create(
+            product=product,
+            initial_quantity=product.stock_quantity,
+            remaining_quantity=product.stock_quantity,
+            cost_price=product.cost_price,
+            selling_price=product.selling_price,
+            received_at=product.created_at,
+        )
+
+
+def _consume_fifo_batches(product, quantity):
+    """Consume available priced stock oldest-first; oversold quantity has no batch."""
+    _ensure_legacy_batch(product)
+    remaining = Decimal(str(quantity))
+    for batch in _available_batches(product):
+        if remaining <= 0:
+            break
+        used = min(remaining, batch.remaining_quantity)
+        batch.remaining_quantity -= used
+        batch.save(update_fields=["remaining_quantity"])
+        remaining -= used
+
+    active = _available_batches(product).first()
+    if active and (product.cost_price != active.cost_price or product.selling_price != active.selling_price):
+        product.cost_price = active.cost_price
+        product.selling_price = active.selling_price
+        product.save(update_fields=["cost_price", "selling_price"])
 
 
 def _money(value):
@@ -149,6 +185,7 @@ def _deduct_order_stock(order):
             continue
         product.stock_quantity -= quantity
         product.save(update_fields=["stock_quantity"])
+        _consume_fifo_batches(product, quantity)
         StockMovement.objects.create(
             product=product,
             order=order,
@@ -912,6 +949,8 @@ def adjust_product_stock(request, product_id):
     reason = (request.POST.get("reason") or "").strip()
     note = (request.POST.get("note") or "").strip()
     occurred_at_raw = (request.POST.get("occurred_at") or "").strip()
+    cost_price_raw = (request.POST.get("cost_price") or "").strip()
+    selling_price_raw = (request.POST.get("selling_price") or "").strip()
 
     try:
         quantity = Decimal(quantity_raw)
@@ -943,8 +982,25 @@ def adjust_product_stock(request, product_id):
 
     occurred_at = timezone.make_aware(datetime.combine(occurred_date, datetime.min.time()))
 
+    cost_price = selling_price = None
+    if adjustment_type == "restock":
+        if cost_price_raw or selling_price_raw:
+            try:
+                cost_price = Decimal(cost_price_raw)
+                selling_price = Decimal(selling_price_raw)
+                if cost_price < 0 or selling_price <= 0:
+                    raise ValueError()
+            except Exception:
+                if _is_ajax(request):
+                    return _json_error("Restock cost and selling prices must be valid.")
+                messages.error(request, "Restock cost and selling prices must be valid.")
+                return redirect(next_url)
+
     with transaction.atomic():
         product = get_object_or_404(Product.objects.select_for_update(), id=product_id)
+        if adjustment_type == "restock" and cost_price is None:
+            cost_price = product.cost_price
+            selling_price = product.selling_price
         delta = quantity if adjustment_type == "restock" else -quantity
         if product.stock_quantity + delta < 0:
             if _is_ajax(request):
@@ -957,8 +1013,26 @@ def adjust_product_stock(request, product_id):
             )
             return redirect(next_url)
 
+        if adjustment_type == "restock":
+            _ensure_legacy_batch(product)
         product.stock_quantity += delta
         product.save(update_fields=["stock_quantity"])
+        if adjustment_type == "restock":
+            StockBatch.objects.create(
+                product=product,
+                initial_quantity=quantity,
+                remaining_quantity=quantity,
+                cost_price=cost_price,
+                selling_price=selling_price,
+                received_at=occurred_at,
+            )
+            active = _available_batches(product).first()
+            if active:
+                product.cost_price = active.cost_price
+                product.selling_price = active.selling_price
+                product.save(update_fields=["cost_price", "selling_price"])
+        else:
+            _consume_fifo_batches(product, quantity)
         StockMovement.objects.create(
             product=product,
             movement_type=(
@@ -1193,6 +1267,13 @@ def create_product(request):
             low_stock_threshold=low_stock_threshold,
         )
         if stock_quantity > 0:
+            StockBatch.objects.create(
+                product=product,
+                initial_quantity=stock_quantity,
+                remaining_quantity=stock_quantity,
+                cost_price=cost_price,
+                selling_price=selling_price,
+            )
             StockMovement.objects.create(
                 product=product,
                 movement_type=StockMovement.TYPE_RESTOCK,
@@ -1256,15 +1337,25 @@ def add_product_to_order(request, order_id, product_id):
             messages.error(request, "Quantity and selling price are required (must be greater than 0).")
             return redirect(next_url)
 
-        OrderItem.objects.create(
-            order=order,
-            product=product,
-            item_name=product.name,
-            quantity=quantity,
-            selling_price=selling_price,
-            box=box or None,
-            cost_price_snapshot=product.cost_price,
-        )
+        _ensure_legacy_batch(product)
+        remaining = quantity
+        batches = list(_available_batches(product))
+        use_batch_selling_price = selling_price_raw == "" or selling_price == product.selling_price
+        for batch in batches:
+            if remaining <= 0:
+                break
+            portion = min(remaining, batch.remaining_quantity)
+            OrderItem.objects.create(
+                order=order, product=product, item_name=product.name, quantity=portion,
+                selling_price=batch.selling_price if use_batch_selling_price else selling_price,
+                box=box or None, cost_price_snapshot=batch.cost_price,
+            )
+            remaining -= portion
+        if remaining > 0:
+            OrderItem.objects.create(
+                order=order, product=product, item_name=product.name, quantity=remaining,
+                selling_price=selling_price, box=box or None, cost_price_snapshot=product.cost_price,
+            )
 
     return redirect(next_url)
 
