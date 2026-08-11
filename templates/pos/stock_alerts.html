@@ -65,7 +65,7 @@
                                 <td class="p-3 text-slate-600">{% if product.code %}#{{ product.code }}{% else %}-{% endif %}</td>
                                 <td class="p-3 font-semibold text-slate-900">{{ product.name }}</td>
                                 <td class="p-3 text-right font-extrabold {% if product.stock_quantity <= 0 %}text-red-700{% else %}text-amber-700{% endif %}">
-                                    {{ product.stock_quantity|whole }}
+                                    {{ product.stock_quantity|quantity }}
                                 </td>
                                 <td class="p-3 text-right text-slate-700">{{ product.low_stock_threshold|whole }}</td>
                                 <td class="p-3">

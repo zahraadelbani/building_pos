@@ -426,6 +426,7 @@ def pos_home(request, order_id=None):
             "order": order,
             "items": order.items.all(),
             "total": order.total_amount(),
+            "total_profit": order.total_profit(),
             "query": query,
             "products": products,
             "can_delete_order": (order.status == "unpaid" and not order.payments.exists()),
@@ -1624,16 +1625,6 @@ def pay_order(request, order_id):
             except ValueError as e:
                 error = str(e)
             else:
-                device_id = get_device_id(request)
-                if device_id:
-                    enqueue_sale_receipt(order=order, target_device_id=device_id)
-                    messages.success(request, "Printing: Customer receipt sent to this device.")
-                else:
-                    messages.error(
-                        request,
-                        "Payment completed, but receipt was NOT printed because Device ID is not set.",
-                    )
-
                 if is_ajax:
                     return JsonResponse(
                         {
@@ -1708,15 +1699,7 @@ def mark_order_paid(request, order_id):
         order.save()
         _deduct_order_stock(order)
 
-    device_id = get_device_id(request)
-    if device_id:
-        enqueue_sale_receipt(order=order, target_device_id=device_id)
-        messages.success(request, f"Order #{order.order_number} marked as paid by {method.upper()}. Receipt sent to printer.")
-    else:
-        messages.error(
-            request,
-            f"Order #{order.order_number} marked as paid, but receipt was NOT printed because Device ID is not set.",
-        )
+    messages.success(request, f"Order #{order.order_number} marked as paid by {method.upper()}.")
     return redirect("pos_home")
 
 

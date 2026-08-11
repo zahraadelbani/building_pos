@@ -3,7 +3,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.utils import timezone
 
 
-LINE_WIDTH_80MM = 48
+# This printer's Font A mode fits 42 characters across 80 mm paper.
+LINE_WIDTH_80MM = 42
 
 
 def _money(value) -> str:
@@ -11,7 +12,16 @@ def _money(value) -> str:
         value = Decimal("0")
     if not isinstance(value, Decimal):
         value = Decimal(str(value))
-    return str(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    formatted = format(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+    return formatted.rstrip("0").rstrip(".")
+
+
+def _quantity(value) -> str:
+    """Format a quantity with up to two decimals and no trailing zeroes."""
+    if value is None:
+        value = Decimal("0")
+    formatted = format(Decimal(str(value)).quantize(Decimal("0.01")), "f")
+    return formatted.rstrip("0").rstrip(".")
 
 
 def _text(value) -> str:
@@ -22,8 +32,9 @@ def _center(line: str, width: int) -> str:
     line = _text(line)
     if len(line) >= width:
         return line[:width]
-    left = (width - len(line)) // 2
-    return (" " * left) + line
+    # Pad both sides to the full receipt width. This keeps centered labels
+    # centered when the print agent centers the complete receipt body.
+    return line.center(width)
 
 
 def _hr(width: int) -> str:
@@ -56,7 +67,7 @@ def _has_box(items) -> bool:
 
 def _format_sale_row(name, qty, price, total, *, box=None, has_box=False, width: int = LINE_WIDTH_80MM) -> str:
     if has_box:
-        item_w, qty_w, box_w, price_w, total_w = (20, 6, 8, 7, 7)
+        item_w, qty_w, box_w, price_w, total_w = (14, 5, 7, 8, 8)
         return (
             _truncate(name, item_w).ljust(item_w)
             + _text(qty).rjust(qty_w)
@@ -65,7 +76,7 @@ def _format_sale_row(name, qty, price, total, *, box=None, has_box=False, width:
             + _text(total).rjust(total_w)
         )[:width]
 
-    item_w, qty_w, price_w, total_w = (26, 6, 8, 8)
+    item_w, qty_w, price_w, total_w = (20, 5, 8, 9)
     return (
         _truncate(name, item_w).ljust(item_w)
         + _text(qty).rjust(qty_w)
@@ -86,7 +97,7 @@ def _format_profit_row(
     width: int = LINE_WIDTH_80MM,
 ) -> str:
     if has_box:
-        item_w, qty_w, box_w, cost_w, price_w, total_w = (16, 5, 7, 7, 7, 6)
+        item_w, qty_w, box_w, cost_w, price_w, total_w = (10, 4, 6, 7, 7, 8)
         return (
             _truncate(name, item_w).ljust(item_w)
             + _text(qty).rjust(qty_w)
@@ -96,7 +107,7 @@ def _format_profit_row(
             + _text(total).rjust(total_w)
         )[:width]
 
-    item_w, qty_w, cost_w, price_w, total_w = (20, 6, 7, 7, 8)
+    item_w, qty_w, cost_w, price_w, total_w = (14, 5, 7, 7, 9)
     return (
         _truncate(name, item_w).ljust(item_w)
         + _text(qty).rjust(qty_w)
@@ -138,7 +149,7 @@ def sale_receipt_text(
         lines.append(
             _format_sale_row(
                 _text(item.item_name),
-                _money(item.quantity),
+                _quantity(item.quantity),
                 _money(item.selling_price),
                 _money(item.line_total()),
                 box=_text(getattr(item, "box", "")) if has_box else None,
@@ -213,7 +224,7 @@ def refund_receipt_text(
         lines.append(
             _format_sale_row(
                 _text(item.item_name),
-                _money(item.quantity),
+                _quantity(item.quantity),
                 _money(item.selling_price),
                 _money(item.line_total()),
                 box=_text(getattr(item, "box", "")) if has_box else None,
@@ -282,7 +293,7 @@ def profit_report_text(*, order, items, total, total_profit, width: int = LINE_W
         lines.append(
             _format_profit_row(
                 _text(item.item_name),
-                _money(item.quantity),
+                _quantity(item.quantity),
                 _money(item.cost_price_snapshot),
                 _money(item.selling_price),
                 _money(item.line_total()),

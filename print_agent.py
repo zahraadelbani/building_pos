@@ -19,6 +19,7 @@ def _get_windows_libusb_backend():
 
     candidates = [
         base / ".venv" / "Lib" / "site-packages" / "libusb_package" / "libusb-1.0.dll",
+        base / ".venv" / "Lib" / "site-packages" / "usb1" / "libusb-1.0.dll",
         base / ".venv" / "Scripts" / "libusb-1.0.dll",
     ]
 
@@ -111,18 +112,31 @@ def _print_logo(printer):
 
 
 def _print_receipt(printer, receipt_text, job_type):
-    """Print the three shop-detail lines large without wrapping the body."""
-    if job_type not in {"SALE_RECEIPT", "REFUND_RECEIPT"}:
-        printer.text(receipt_text)
-        return
-
+    """Print a large shop header and a readable, proportional body."""
     lines = receipt_text.splitlines(keepends=True)
-    printer.set(align="center", width=2, height=2)
+
+    # A previous job can leave an ESC/POS printer in an enlarged mode.
+    printer.set(align="left", normal_textsize=True, bold=False)
+
+    # Strip the pre-calculated centering spaces before using printer centering;
+    # otherwise double-width text can wrap across the paper.
+    printer.set(align="center", double_width=True, double_height=True)
     for line in lines[:3]:
         printer.text(line.strip() + "\n")
 
-    printer.set(align="left", width=1, height=1)
+    # ESC/POS has no intermediate size between normal and double. Font A in
+    # bold is the clearest middle ground and keeps all table columns aligned.
+    # Centering the complete 42-column lines balances the body on the paper.
+    printer.set(
+        align="center",
+        font="a",
+        normal_textsize=True,
+        bold=True,
+    )
     printer.text("".join(lines[3:]))
+
+    # Leave the printer in a predictable state for the next job.
+    printer.set(align="left", normal_textsize=True, bold=False)
 
 
 # =========================

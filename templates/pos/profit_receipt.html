@@ -113,7 +113,7 @@
             {% for item in items %}
                 <tr>
                     <td>{{ item.item_name }}</td>
-                    <td class="right">{{ item.quantity|whole }}</td>
+                    <td class="right">{{ item.quantity|quantity }}</td>
                     {% if has_box %}
                         <td class="right">{% if item.box %}{{ item.box }}{% endif %}</td>
                     {% endif %}

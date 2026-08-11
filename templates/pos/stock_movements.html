@@ -186,7 +186,7 @@
                                 </td>
                                 <td class="px-4 py-3 text-slate-700">{{ movement.get_movement_type_display }}</td>
                                 <td class="px-4 py-3 text-right font-extrabold {% if movement.quantity_delta < 0 %}text-red-700{% else %}text-emerald-700{% endif %}">
-                                    {{ movement.quantity_delta|whole }}
+                                    {{ movement.quantity_delta|quantity }}
                                 </td>
                                 <td class="stock-reason-cell px-4 py-3 text-slate-700">{{ movement.reason }}</td>
                                 <td class="px-4 py-3 text-slate-700">

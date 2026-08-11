@@ -104,7 +104,7 @@
                         {% for item in items %}
                             <tr class="border-t border-slate-100">
                                 <td class="px-4 py-3 font-semibold text-slate-900">{{ item.item_name }}</td>
-                                <td class="px-4 py-3 text-right text-slate-700 tabular-nums">{{ item.quantity|whole }}</td>
+                                <td class="px-4 py-3 text-right text-slate-700 tabular-nums">{{ item.quantity|quantity }}</td>
                                 <td class="px-4 py-3 text-right text-slate-700">{{ item.box|default:"-" }}</td>
                                 <td class="px-4 py-3 text-right text-slate-700 tabular-nums">{{ item.selling_price|whole }}</td>
                                 <td class="px-4 py-3 text-right font-semibold text-slate-900 tabular-nums">{{ item.line_total|whole }}</td>
@@ -211,7 +211,7 @@
                                         {% for item in refund.items.all %}
                                             <tr class="border-t border-slate-100">
                                                 <td class="px-3 py-2 font-semibold text-slate-900">{{ item.item_name }}</td>
-                                                <td class="px-3 py-2 text-right tabular-nums">{{ item.quantity|whole }}</td>
+                                                <td class="px-3 py-2 text-right tabular-nums">{{ item.quantity|quantity }}</td>
                                                 <td class="px-3 py-2 text-right tabular-nums">{{ item.amount|whole }}</td>
                                             </tr>
                                         {% endfor %}

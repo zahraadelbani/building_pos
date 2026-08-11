@@ -23,7 +23,7 @@
                         {% endif %}
                     </div>
                     <div class="text-xs font-semibold {% if p.stock_quantity <= 0 %}text-red-700{% elif p.stock_quantity <= p.low_stock_threshold %}text-amber-700{% else %}text-emerald-700{% endif %}">
-                        {{ p.selling_price|whole }} · Stock: {{ p.stock_quantity|whole }}
+                        {{ p.selling_price|whole }} · Stock: {{ p.stock_quantity|quantity }}
                         {% if p.stock_quantity <= 0 %}
                             · Out
                         {% elif p.stock_quantity <= p.low_stock_threshold %}
@@ -35,7 +35,7 @@
                         data-select-product="1"
                         data-product-name="{{ p.name }}"
                         data-selling-price="{{ p.selling_price|whole }}"
-                        data-stock-quantity="{{ p.stock_quantity|whole }}"
+                        data-stock-quantity="{{ p.stock_quantity|quantity }}"
                         data-action-url="{% url 'add_product_to_order' order.id p.id %}"
                         aria-label="Select {{ p.name }}"
                         class="shrink-0 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50">

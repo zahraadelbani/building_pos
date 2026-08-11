@@ -609,7 +609,7 @@ class DiscountAndCustomerTests(TestCase):
         self.assertEqual(payment.method, "wave")
         self.assertEqual(payment.amount_received, Decimal("200"))
 
-    def test_mark_paid_sends_receipt_to_current_device(self):
+    def test_mark_paid_does_not_print_automatically(self):
         order = self._create_order_with_item()
         session = self.client.session
         session["pos_device_id"] = "cashier-1"
@@ -618,9 +618,7 @@ class DiscountAndCustomerTests(TestCase):
         response = self.client.post(reverse("mark_order_paid", args=[order.id]))
 
         self.assertEqual(response.status_code, 302)
-        job = PrintJob.objects.get(job_type=PrintJob.JOB_SALE_RECEIPT)
-        self.assertEqual(job.target_device_id, "cashier-1")
-        self.assertEqual(job.payload["order_number"], order.order_number)
+        self.assertFalse(PrintJob.objects.exists())
 
     def test_wave_payment_requires_exact_amount(self):
         order = self._create_order_with_item()

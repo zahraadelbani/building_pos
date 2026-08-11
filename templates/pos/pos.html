@@ -140,14 +140,14 @@
 
                                         <div class="flex flex-col gap-1">
                                             <label class="text-sm font-semibold text-slate-700">Quantity</label>
-                                            <input type="number" step="1" min="1" name="quantity" id="selected-qty" value="1"
+                                            <input type="number" step="0.01" min="0.01" name="quantity" id="selected-qty" value="1"
                                                    class="border border-slate-200 px-3 py-2 rounded-lg text-base w-32 bg-white"
                                                    required>
                                         </div>
 
                                         <div class="flex flex-col gap-1">
                                             <label class="text-sm font-semibold text-slate-700">Selling price</label>
-                                            <input type="number" step="1" min="1" name="selling_price" id="selected-selling"
+                                            <input type="number" step="0.01" min="0.01" name="selling_price" id="selected-selling"
                                                    class="border border-slate-200 px-3 py-2 rounded-lg text-base w-40 bg-white"
                                                    placeholder="0"
                                                    required>
@@ -206,7 +206,7 @@
                                             <td class="p-3 font-semibold text-slate-900">
                                                 {{ item.item_name }}
                                             </td>
-                                            <td class="p-3 text-right text-slate-800">{{ item.quantity|whole }}</td>
+                                            <td class="p-3 text-right text-slate-800">{{ item.quantity|quantity }}</td>
                                             <td class="p-3 text-right text-slate-800">
                                                 {% if item.box %}
                                                     {{ item.box }}
@@ -259,13 +259,13 @@
                                                     </div>
                                                     <div class="flex flex-col gap-1">
                                                         <label class="text-sm font-semibold text-slate-700">Quantity</label>
-                                                        <input type="number" step="1" min="1" name="quantity" value="{{ item.quantity|whole }}"
+                                                        <input type="number" step="0.01" min="0.01" name="quantity" value="{{ item.quantity|quantity }}"
                                                                class="border border-slate-200 px-3 py-2 rounded-lg text-base w-32 bg-white"
                                                                required>
                                                     </div>
                                                     <div class="flex flex-col gap-1">
                                                         <label class="text-sm font-semibold text-slate-700">Selling price</label>
-                                                        <input type="number" step="1" min="1" name="selling_price" value="{{ item.selling_price|whole }}"
+                                                        <input type="number" step="0.01" min="0.01" name="selling_price" value="{{ item.selling_price|whole }}"
                                                                class="border border-slate-200 px-3 py-2 rounded-lg text-base w-40 bg-white"
                                                                required>
                                                     </div>
@@ -321,6 +321,10 @@
                                 <div class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total</div>
                                 <div class="text-3xl font-extrabold text-emerald-700 tabular-nums">{{ total|whole }}</div>
                             </div>
+                            <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+                                <div class="font-semibold tracking-wide uppercase">Profit</div>
+                                <div class="font-bold tabular-nums">{{ total_profit|whole }}</div>
+                            </div>
                         </div>
                         <form id="bill-details-form" method="post" action="{% url 'update_order_details' order.id %}" class="p-5 border-b border-slate-200 space-y-3">
                             {% csrf_token %}
@@ -342,7 +346,7 @@
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold text-slate-700 mb-1">Value</label>
-                                    <input type="number" step="1" min="0" name="discount_value" value="{{ order.discount_value|whole }}"
+                                    <input type="number" step="0.01" min="0" name="discount_value" value="{{ order.discount_value|whole }}"
                                            class="w-full border border-slate-200 px-3 py-2 rounded-lg text-base bg-white">
                                 </div>
                             </div>
@@ -365,7 +369,7 @@
                                class="block w-full text-center rounded-2xl bg-teal-700 text-white px-6 py-3 text-lg font-extrabold hover:bg-teal-800">
                                 <span class="inline-flex items-center justify-center gap-2">
                                     <svg viewBox="0 0 24 24" width="16" height="16" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 8V4h10v4M6 18H4v-7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7h-2M7 14h10v6H7z"/></svg>
-                                    <span>Print</span>
+                                    <span>Pay</span>
                                 </span>
                             </button>
 
@@ -462,14 +466,14 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-semibold text-slate-700">Quantity</label>
-                    <input type="number" step="1" min="1" name="quantity" value="1"
+                    <input type="number" step="0.01" min="0.01" name="quantity" value="1"
                            class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
                            required>
                 </div>
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-semibold text-slate-700">Selling price</label>
-                    <input type="number" step="1" min="1" name="selling_price"
+                    <input type="number" step="0.01" min="0.01" name="selling_price"
                            class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
                            placeholder="0"
                            required>
@@ -477,7 +481,7 @@
 
                 <div class="flex flex-col gap-1">
                     <label class="text-sm font-semibold text-slate-700">Cost</label>
-                    <input type="number" step="1" min="0" name="cost_price"
+                    <input type="number" step="0.01" min="0" name="cost_price"
                            class="border border-slate-200 px-3 py-2 rounded-lg text-base bg-white"
                            placeholder="0">
                 </div>
@@ -554,7 +558,7 @@
                                     <span class="text-xs text-slate-500">Tap to enter</span>
                                 </div>
                                 <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
-                                       type="number" step="1" min="0" name="cash" id="quick-cash-input"
+                                       type="number" step="0.01" min="0" name="cash" id="quick-cash-input"
                                        class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
                                        placeholder="0">
                             </div>
@@ -566,7 +570,7 @@
                                     <span class="text-xs text-slate-500">Amount + bank</span>
                                 </div>
                                 <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
-                                       type="number" step="1" min="0" name="bank" id="quick-bank-input"
+                                       type="number" step="0.01" min="0" name="bank" id="quick-bank-input"
                                        class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
                                        placeholder="0">
                                 <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
@@ -582,7 +586,7 @@
                                     <span class="text-xs text-slate-500">Optional</span>
                                 </div>
                                 <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
-                                       type="number" step="1" min="0" name="wave" id="quick-wave-input"
+                                       type="number" step="0.01" min="0" name="wave" id="quick-wave-input"
                                        class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
                                        placeholder="0">
                             </div>
@@ -594,7 +598,7 @@
                                     <span class="text-xs text-slate-500">Optional</span>
                                 </div>
                                 <input onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()"
-                                       type="number" step="1" min="0" name="aps" id="quick-aps-input"
+                                       type="number" step="0.01" min="0" name="aps" id="quick-aps-input"
                                        class="hidden mt-2 w-full border border-slate-200 px-3 py-2 rounded-xl text-base bg-white"
                                        placeholder="0">
                             </div>
@@ -867,7 +871,7 @@
         function money(value) {
             const number = Number(value || 0);
             if (!Number.isFinite(number)) return "0";
-            return Math.round(number).toString();
+            return number.toFixed(2).replace(/\.?0+$/, "");
         }
 
         function amount(form, name) {
