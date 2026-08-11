@@ -633,6 +633,25 @@ class DiscountAndCustomerTests(TestCase):
 
 
 class StockLogicTests(TestCase):
+    def test_adding_same_product_twice_merges_matching_lines(self):
+        product = Product.objects.create(
+            code=15,
+            name="PVC clip",
+            cost_price=Decimal("4.25"),
+            selling_price=Decimal("8.75"),
+            stock_quantity=Decimal("100"),
+        )
+        order = Order.objects.create(order_number=15, status="unpaid")
+        url = reverse("add_product_to_order", args=[order.id, product.id])
+
+        self.client.post(url, {"quantity": "17", "selling_price": "8.75"})
+        self.client.post(url, {"quantity": "3.5", "selling_price": "8.75"})
+
+        self.assertEqual(order.items.count(), 1)
+        item = order.items.get()
+        self.assertEqual(item.quantity, Decimal("20.50"))
+        self.assertEqual(item.selling_price, Decimal("8.75"))
+
     def test_restock_prices_wait_for_old_stock_and_crossing_sale_splits_fifo(self):
         product = Product.objects.create(
             code=16, name="FIFO Screw", cost_price=Decimal("50"),

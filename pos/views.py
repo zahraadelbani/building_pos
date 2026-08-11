@@ -1298,6 +1298,37 @@ def create_product(request):
     return redirect(next_url)
 
 
+def _merge_or_create_product_line(*, order, product, quantity, selling_price, cost_price, box):
+    """Merge identical product lines while preserving distinct price/cost batches."""
+    normalized_box = box or None
+    existing = (
+        OrderItem.objects.select_for_update()
+        .filter(
+            order=order,
+            product=product,
+            selling_price=selling_price,
+            cost_price_snapshot=cost_price,
+            box=normalized_box,
+        )
+        .order_by("id")
+        .first()
+    )
+    if existing:
+        existing.quantity += quantity
+        existing.save(update_fields=["quantity"])
+        return existing
+
+    return OrderItem.objects.create(
+        order=order,
+        product=product,
+        item_name=product.name,
+        quantity=quantity,
+        selling_price=selling_price,
+        box=normalized_box,
+        cost_price_snapshot=cost_price,
+    )
+
+
 def add_product_to_order(request, order_id, product_id):
     if request.method != "POST":
         return redirect("pos_order", order_id=order_id)
@@ -1346,16 +1377,23 @@ def add_product_to_order(request, order_id, product_id):
             if remaining <= 0:
                 break
             portion = min(remaining, batch.remaining_quantity)
-            OrderItem.objects.create(
-                order=order, product=product, item_name=product.name, quantity=portion,
+            _merge_or_create_product_line(
+                order=order,
+                product=product,
+                quantity=portion,
                 selling_price=batch.selling_price if use_batch_selling_price else selling_price,
-                box=box or None, cost_price_snapshot=batch.cost_price,
+                box=box,
+                cost_price=batch.cost_price,
             )
             remaining -= portion
         if remaining > 0:
-            OrderItem.objects.create(
-                order=order, product=product, item_name=product.name, quantity=remaining,
-                selling_price=selling_price, box=box or None, cost_price_snapshot=product.cost_price,
+            _merge_or_create_product_line(
+                order=order,
+                product=product,
+                quantity=remaining,
+                selling_price=selling_price,
+                box=box,
+                cost_price=product.cost_price,
             )
 
     return redirect(next_url)
