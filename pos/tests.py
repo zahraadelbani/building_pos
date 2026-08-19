@@ -633,6 +633,52 @@ class DiscountAndCustomerTests(TestCase):
 
 
 class StockLogicTests(TestCase):
+    def test_cross_batch_sale_shows_one_pos_and_customer_line_but_keeps_costs(self):
+        product = Product.objects.create(
+            code=14,
+            name="PVC clip",
+            cost_price=Decimal("4"),
+            selling_price=Decimal("8.75"),
+            stock_quantity=Decimal("50"),
+        )
+        StockBatch.objects.create(
+            product=product,
+            initial_quantity=Decimal("30"),
+            remaining_quantity=Decimal("30"),
+            cost_price=Decimal("4"),
+            selling_price=Decimal("8.75"),
+        )
+        StockBatch.objects.create(
+            product=product,
+            initial_quantity=Decimal("20"),
+            remaining_quantity=Decimal("20"),
+            cost_price=Decimal("5"),
+            selling_price=Decimal("8.75"),
+        )
+        order = Order.objects.create(order_number=14, status="unpaid")
+
+        self.client.post(
+            reverse("add_product_to_order", args=[order.id, product.id]),
+            {"quantity": "50", "selling_price": "8.75"},
+        )
+
+        allocations = list(order.items.order_by("id"))
+        self.assertEqual(len(allocations), 2)
+        self.assertEqual(
+            [(item.quantity, item.cost_price_snapshot) for item in allocations],
+            [(Decimal("30"), Decimal("4")), (Decimal("20"), Decimal("5"))],
+        )
+
+        response = self.client.get(reverse("pos_order", args=[order.id]))
+        visible_items = list(response.context["items"])
+        self.assertEqual(len(visible_items), 1)
+        self.assertEqual(visible_items[0].quantity, Decimal("50"))
+
+        from .printing import _customer_items
+        customer_items = _customer_items(order.items.order_by("id"))
+        self.assertEqual(len(customer_items), 1)
+        self.assertEqual(customer_items[0].quantity, Decimal("50"))
+
     def test_adding_same_product_twice_merges_matching_lines(self):
         product = Product.objects.create(
             code=15,
@@ -924,6 +970,44 @@ class StockLogicTests(TestCase):
         refund = Refund.objects.get(order=order)
         self.assertEqual(refund.method, "wave")
         self.assertEqual(refund.items.get().quantity, Decimal("1.00"))
+
+    def test_discounted_order_refunds_original_price_then_caps_final_refund(self):
+        order = Order.objects.create(
+            order_number=33,
+            status="paid",
+            is_active=False,
+            discount_type=Order.DISCOUNT_AMOUNT,
+            discount_value=Decimal("100"),
+        )
+        first = OrderItem.objects.create(
+            order=order,
+            item_name="First item",
+            quantity=Decimal("1"),
+            selling_price=Decimal("2000"),
+            cost_price_snapshot=Decimal("1200"),
+        )
+        second = OrderItem.objects.create(
+            order=order,
+            item_name="Second item",
+            quantity=Decimal("1"),
+            selling_price=Decimal("600"),
+            cost_price_snapshot=Decimal("300"),
+        )
+
+        page = self.client.get(reverse("refund_order", args=[order.id]))
+        first_context = next(item for item in page.context["items"] if item.id == first.id)
+        self.assertEqual(first_context.refund_unit_amount, Decimal("2000.00"))
+        self.assertEqual(first_context.discounted_unit_amount, Decimal("1923.08"))
+
+        self.client.post(reverse("refund_order", args=[order.id]), {f"quantity_{first.id}": "1"})
+        first_refund = Refund.objects.get(order=order)
+        self.assertEqual(first_refund.amount, Decimal("2000.00"))
+        self.assertEqual(first_refund.items.get().amount, Decimal("2000.00"))
+
+        self.client.post(reverse("refund_order", args=[order.id]), {f"quantity_{second.id}": "1"})
+        refunds = list(Refund.objects.filter(order=order).order_by("refunded_at", "id"))
+        self.assertEqual([refund.amount for refund in refunds], [Decimal("2000.00"), Decimal("500.00")])
+        self.assertEqual(sum((refund.amount for refund in refunds), Decimal("0")), order.total_amount())
 
     def test_stock_summary_counts_refunds_against_sold_quantity(self):
         order = Order.objects.create(order_number=32, status="unpaid")

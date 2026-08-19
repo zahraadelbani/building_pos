@@ -15,10 +15,14 @@
             </a>
         </div>
 
-        <div class="grid gap-4 sm:grid-cols-3 p-6 bg-slate-50 border-b border-slate-200">
+        <div class="grid gap-4 sm:grid-cols-4 p-6 bg-slate-50 border-b border-slate-200">
             <div>
-                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Original Total</div>
+                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Paid Total</div>
                 <div class="mt-1 text-2xl font-extrabold text-slate-900 tabular-nums">{{ total|whole }}</div>
+            </div>
+            <div>
+                <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Order Discount</div>
+                <div class="mt-1 text-2xl font-extrabold text-amber-700 tabular-nums">-{{ order.discount_amount|whole }}</div>
             </div>
             <div>
                 <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">Already Refunded</div>
@@ -43,6 +47,7 @@
                                 <th class="px-4 py-3 text-right">Refunded</th>
                                 <th class="px-4 py-3 text-right">Available</th>
                                 <th class="px-4 py-3 text-right">Refund Qty</th>
+                                <th class="px-4 py-3 text-right">Price Paid</th>
                                 <th class="px-4 py-3 text-right">Refund Unit</th>
                             </tr>
                         </thead>
@@ -66,7 +71,11 @@
                                                class="w-28 border border-slate-200 rounded-lg px-3 py-2 text-right tabular-nums"
                                                {% if item.refundable_quantity_value <= 0 %}disabled{% endif %}>
                                     </td>
-                                    <td class="px-4 py-3 text-right tabular-nums">{{ item.refund_unit_amount|whole }}</td>
+                                    <td class="px-4 py-3 text-right tabular-nums text-amber-700">
+                                        {{ item.discounted_unit_amount|whole }}
+                                        {% if order.discount_amount %}<div class="text-xs font-semibold">discounted</div>{% endif %}
+                                    </td>
+                                    <td class="px-4 py-3 text-right tabular-nums font-semibold">{{ item.refund_unit_amount|whole }}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>

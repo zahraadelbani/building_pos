@@ -1,5 +1,6 @@
 from datetime import datetime
 from calendar import month_name
+import copy
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import quote
 
@@ -27,6 +28,27 @@ from .printing import (
 DEVICE_ID_SESSION_KEY = "pos_device_id"
 DEVICE_ID_COOKIE_NAME = "pos_device_id"
 DEVICE_ID_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+
+
+def _group_pos_items(items):
+    """Combine visible product lines without changing FIFO cost allocations."""
+    grouped = []
+    by_key = {}
+    for item in items:
+        key = (
+            item.product_id,
+            item.item_name,
+            item.selling_price,
+            item.box or "",
+        ) if item.product_id else ("custom", item.id)
+        visible = by_key.get(key)
+        if visible is None:
+            visible = copy.copy(item)
+            by_key[key] = visible
+            grouped.append(visible)
+        else:
+            visible.quantity += item.quantity
+    return grouped
 
 
 def _next_product_code():
@@ -111,11 +133,14 @@ def _order_refund_scale(order):
 
 
 def _refund_amount_for(order, gross_amount):
-    return _money(Decimal(str(gross_amount)) * _order_refund_scale(order))
+    # Refund returned items at their original selling price. The order-level
+    # discount stays against the items the customer keeps; the refund is capped
+    # at the order's remaining paid balance when the refund is created.
+    return _money(gross_amount)
 
 
 def _refund_profit_for(order, gross_profit):
-    return _money(Decimal(str(gross_profit)) * _order_refund_scale(order))
+    return _money(gross_profit)
 
 
 def _attach_refund_state(order):
@@ -134,9 +159,11 @@ def _refund_context_items(order):
         if refundable_quantity < 0:
             refundable_quantity = Decimal("0")
         refund_unit_amount = _refund_amount_for(order, item.selling_price)
+        discounted_unit_amount = _money(Decimal(str(item.selling_price)) * _order_refund_scale(order))
         item.refunded_quantity_value = refunded_quantity
         item.refundable_quantity_value = refundable_quantity
         item.refund_unit_amount = refund_unit_amount
+        item.discounted_unit_amount = discounted_unit_amount
         item.refundable_amount = _money(refundable_quantity * refund_unit_amount)
         items.append(item)
     return items
@@ -424,7 +451,7 @@ def pos_home(request, order_id=None):
         {
             "open_orders": open_orders,
             "order": order,
-            "items": order.items.all(),
+            "items": _group_pos_items(order.items.select_related("product").order_by("id")),
             "total": order.total_amount(),
             "total_profit": order.total_profit(),
             "query": query,
@@ -1523,7 +1550,16 @@ def remove_order_item(request, order_id, item_id):
     item = get_object_or_404(OrderItem, id=item_id, order=order)
 
     label = item.item_name
-    item.delete()
+    if item.product_id:
+        OrderItem.objects.filter(
+            order=order,
+            product_id=item.product_id,
+            item_name=item.item_name,
+            selling_price=item.selling_price,
+            box=item.box,
+        ).delete()
+    else:
+        item.delete()
     messages.success(request, f"Removed item: {label}")
     return redirect("pos_order", order_id=order_id)
 
@@ -1562,11 +1598,42 @@ def update_order_item(request, order_id, item_id):
             order=order,
         )
 
-        item.item_name = item_name[:255]
-        item.quantity = quantity
-        item.selling_price = selling_price
-        item.box = box or None
-        item.save(update_fields=["item_name", "quantity", "selling_price", "box"])
+        allocations = [item]
+        if item.product_id:
+            allocations = list(
+                OrderItem.objects.select_for_update().filter(
+                    order=order,
+                    product_id=item.product_id,
+                    item_name=item.item_name,
+                    selling_price=item.selling_price,
+                    box=item.box,
+                ).order_by("id")
+            )
+
+        remaining = quantity
+        for allocation in allocations:
+            new_quantity = remaining if len(allocations) == 1 else min(remaining, allocation.quantity)
+            allocation.item_name = item_name[:255]
+            allocation.quantity = new_quantity
+            allocation.selling_price = selling_price
+            allocation.box = box or None
+            if new_quantity > 0:
+                allocation.save(update_fields=["item_name", "quantity", "selling_price", "box"])
+            else:
+                allocation.delete()
+            remaining -= new_quantity
+
+        if remaining > 0:
+            last = allocations[-1]
+            OrderItem.objects.create(
+                order=order,
+                product=last.product,
+                item_name=item_name[:255],
+                quantity=remaining,
+                selling_price=selling_price,
+                box=box or None,
+                cost_price_snapshot=last.cost_price_snapshot,
+            )
 
     messages.success(request, f"Updated item: {item.item_name}")
     return redirect("pos_order", order_id=order_id)
@@ -1859,21 +1926,19 @@ def refund_order(request, order_id):
                     )
                     remaining_after_refund[item.id] = Decimal(str(item.refundable_quantity())) - selected_quantity
                 is_final_refund = all(quantity <= 0 for quantity in remaining_after_refund.values())
-                if is_final_refund and selected_items:
-                    difference = _money(remaining_total - refund_total)
-                    selected_items[-1]["amount"] = _money(selected_items[-1]["amount"] + difference)
-                    refund_total = _money(remaining_total)
                 if refund_total > remaining_total:
+                    balance_to_allocate = _money(remaining_total)
+                    for row in selected_items:
+                        row["amount"] = _money(min(row["amount"], balance_to_allocate))
+                        balance_to_allocate = _money(balance_to_allocate - row["amount"])
                     refund_total = _money(remaining_total)
                 if refund_total <= 0:
                     raise ValueError("This order has no refundable balance left.")
 
+                for row in selected_items:
+                    returned_cost = Decimal(str(row["item"].cost_price_snapshot)) * row["quantity"]
+                    row["profit_amount"] = _money(row["amount"] - returned_cost)
                 refund_profit = sum((row["profit_amount"] for row in selected_items), Decimal("0"))
-                if is_final_refund:
-                    remaining_profit = Decimal(str(order.total_profit())) - Decimal(str(order.refunded_profit()))
-                    profit_difference = _money(remaining_profit - refund_profit)
-                    selected_items[-1]["profit_amount"] = _money(selected_items[-1]["profit_amount"] + profit_difference)
-                    refund_profit = _money(remaining_profit)
                 refund = Refund.objects.create(
                     order=order,
                     method=method,

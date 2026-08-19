@@ -1,3 +1,5 @@
+import copy
+
 from django.db import transaction
 
 from .models import Expense, Order, PrintJob, Refund
@@ -11,8 +13,24 @@ from .receipt import (
 )
 
 
+def _customer_items(items):
+    """Group visible customer lines while retaining FIFO rows internally."""
+    grouped = []
+    by_key = {}
+    for item in items:
+        key = (item.product_id, item.item_name, item.selling_price, item.box or "") if item.product_id else ("custom", item.id)
+        visible = by_key.get(key)
+        if visible is None:
+            visible = copy.copy(item)
+            by_key[key] = visible
+            grouped.append(visible)
+        else:
+            visible.quantity += item.quantity
+    return grouped
+
+
 def enqueue_sale_receipt(*, order, target_device_id: str):
-    items = list(order.items.all())
+    items = _customer_items(order.items.all().order_by("id"))
     payments = list(order.payments.all().order_by("paid_at", "id"))
     total = order.total_amount()
 
@@ -39,7 +57,7 @@ def enqueue_sale_copy(*, order, copy_type: str, target_device_id: str):
     if copy_type != PrintJob.COPY_CUSTOMER:
         return
 
-    items = list(order.items.all())
+    items = _customer_items(order.items.all().order_by("id"))
     payments = list(order.payments.all().order_by("paid_at", "id"))
     total = order.total_amount()
     copy_label = "CUSTOMER"
