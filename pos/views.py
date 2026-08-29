@@ -1090,6 +1090,7 @@ def adjust_product_stock(request, product_id):
 
 
 def expenses_page(request):
+    search_query = (request.GET.get("q") or "").strip()
     raw_date = (request.GET.get("date") or "").strip()
     raw_month = (request.GET.get("month") or "").strip()
     category = (request.GET.get("category") or "").strip()
@@ -1098,6 +1099,15 @@ def expenses_page(request):
     expenses = Expense.objects.all()
     selected_date = None
     selected_month_value = ""
+
+    if search_query:
+        expenses = expenses.filter(
+            Q(description__icontains=search_query)
+            | Q(notes__icontains=search_query)
+            | Q(bank_name__icontains=search_query)
+            | Q(category__icontains=search_query)
+            | Q(payment_method__icontains=search_query)
+        )
 
     if raw_date:
         try:
@@ -1138,6 +1148,7 @@ def expenses_page(request):
             "page_obj": page_obj,
             "category_choices": Expense.CATEGORY_CHOICES,
             "payment_method_choices": Expense.PAYMENT_METHODS,
+            "search_query": search_query,
             "selected_date": selected_date,
             "selected_date_value": selected_date.strftime("%Y-%m-%d") if selected_date else "",
             "selected_month_value": selected_month_value,

@@ -10,6 +10,32 @@ from .receipt import day_summary_text, month_summary_text
 from .receipt import sale_receipt_text
 
 
+class ExpensePageTests(TestCase):
+    def test_search_filters_expenses_and_updates_total(self):
+        Expense.objects.create(
+            date=datetime(2026, 4, 10).date(),
+            category=Expense.CATEGORY_UTILITIES,
+            description="Shop electricity",
+            amount=Decimal("75"),
+            notes="April meter bill",
+        )
+        Expense.objects.create(
+            date=datetime(2026, 4, 11).date(),
+            category=Expense.CATEGORY_TRANSPORT,
+            description="Delivery fuel",
+            amount=Decimal("25"),
+        )
+
+        response = self.client.get(reverse("expenses"), {"q": "meter"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_expenses"], Decimal("75"))
+        self.assertEqual(response.context["page_obj"].paginator.count, 1)
+        self.assertContains(response, "Shop electricity")
+        self.assertNotContains(response, "Delivery fuel")
+        self.assertContains(response, 'value="meter"')
+
+
 class MonthSummaryTests(TestCase):
     def _create_paid_order(self, *, order_number: int, paid_at, quantity="2", cost="30", selling="50"):
         order = Order.objects.create(order_number=order_number, status="paid", is_active=False, created_at=paid_at)
